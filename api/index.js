@@ -35,6 +35,9 @@ async function ensureTables() {
   try { await sql(`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS password TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
+  // Clean up legacy columns that might cause NOT NULL violations
+  try { await sql(`ALTER TABLE assignments ALTER COLUMN "date" DROP NOT NULL`); } catch(e){}
+  try { await sql(`ALTER TABLE assignments DROP COLUMN IF EXISTS "date"`); } catch(e){}
 }
 
 let tablesReady = null;
