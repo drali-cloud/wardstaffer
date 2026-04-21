@@ -12,6 +12,8 @@ export interface WardRequirements {
   genderDiversity: 'None' | 'Balanced' | 'Specific';
   requiredMale?: number;
   requiredFemale?: number;
+  shiftDuration: '6h' | '12h' | '24h';
+  staffPerShift: 1 | 2;
 }
 
 export interface Ward {
@@ -20,9 +22,18 @@ export interface Ward {
   requirements: WardRequirements;
 }
 
+export interface ShiftRecord {
+  id: string;
+  period: string; // YYYY-MM
+  day: number;
+  wardId: string;
+  slotIndex: number; // 0, 1, 2...
+  doctorId: string;
+}
+
 export interface Assignment {
   id: string;
-  date: string;
+  period: string; // YYYY-MM
   wardId: string;
   doctorIds: string[];
 }

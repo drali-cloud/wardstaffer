@@ -28,7 +28,8 @@ async function ensureTables() {
   await Promise.all([
     sql(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, password TEXT, "previousWards" TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL)`),
-    sql(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, date TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`)
+    sql(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, period TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`),
+    sql(`CREATE TABLE IF NOT EXISTS shifts (id TEXT PRIMARY KEY, period TEXT NOT NULL, day INTEGER NOT NULL, "wardId" TEXT NOT NULL, "slotIndex" INTEGER NOT NULL, "doctorId" TEXT NOT NULL)`)
   ]);
   // Migration: Ensure password column exists if table was already created
   try { await sql(`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS password TEXT`); } catch(e){}
@@ -81,13 +82,27 @@ async function upsertWard(w) {
 async function upsertAssignment(a) {
     const sql = getSql();
     await sql(`
-        INSERT INTO assignments (id, date, "wardId", "doctorIds") 
+        INSERT INTO assignments (id, period, "wardId", "doctorIds") 
         VALUES ($1, $2, $3, $4) 
         ON CONFLICT (id) DO UPDATE SET 
-            date = EXCLUDED.date, 
+            period = EXCLUDED.period, 
             "wardId" = EXCLUDED."wardId", 
             "doctorIds" = EXCLUDED."doctorIds"
-    `, [a.id, a.date, a.wardId, JSON.stringify(a.doctorIds)]);
+    `, [a.id, a.period, a.wardId, JSON.stringify(a.doctorIds)]);
+}
+
+async function upsertShift(s) {
+    const sql = getSql();
+    await sql(`
+        INSERT INTO shifts (id, period, day, "wardId", "slotIndex", "doctorId") 
+        VALUES ($1, $2, $3, $4, $5, $6) 
+        ON CONFLICT (id) DO UPDATE SET 
+            period = EXCLUDED.period, 
+            day = EXCLUDED.day, 
+            "wardId" = EXCLUDED."wardId", 
+            "slotIndex" = EXCLUDED."slotIndex", 
+            "doctorId" = EXCLUDED."doctorId"
+    `, [s.id, s.period, s.day, s.wardId, s.slotIndex, s.doctorId]);
 }
 
 // --- Doctors ---
@@ -230,6 +245,80 @@ app.delete('/api/assignments', async (req, res) => {
   try {
     const sql = getSql();
     await sql('DELETE FROM assignments');
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/assignments/bulk', async (req, res) => {
+  await getTablesReady();
+  const { ids } = req.body;
+  if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: 'IDs required' });
+  if (isUsingMock) {
+    mockDb.assignments = mockDb.assignments.filter(a => !ids.includes(a.id));
+    return res.json({ success: true });
+  }
+  try {
+    const sql = getSql();
+    await Promise.all(ids.map(id => sql('DELETE FROM assignments WHERE id = $1', [id])));
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/assignments/:id', async (req, res) => {
+  await getTablesReady();
+  const assignment = { ...req.body, id: req.params.id };
+  if (isUsingMock) {
+    const idx = mockDb.assignments.findIndex(a => a.id === req.params.id);
+    if (idx > -1) mockDb.assignments[idx] = assignment;
+    return res.json({ success: true });
+  }
+  try {
+    await upsertAssignment(assignment);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- Shifts (Daily Roster) ---
+app.get('/api/shifts', async (req, res) => {
+  await getTablesReady();
+  if (isUsingMock) return res.json(mockDb.shifts || []);
+  try {
+    const sql = getSql();
+    const rows = await sql('SELECT * FROM shifts');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/shifts', async (req, res) => {
+  await getTablesReady();
+  const shifts = Array.isArray(req.body) ? req.body : [req.body];
+  if (isUsingMock) {
+    if (!mockDb.shifts) mockDb.shifts = [];
+    for (const s of shifts) {
+      const idx = mockDb.shifts.findIndex(exist => exist.id === s.id);
+      if (idx > -1) mockDb.shifts[idx] = s;
+      else mockDb.shifts.push(s);
+    }
+    return res.json({ success: true });
+  }
+  try {
+    await Promise.all(shifts.map(s => upsertShift(s)));
+    res.status(201).json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/shifts', async (req, res) => {
+  await getTablesReady();
+  const { period } = req.body;
+  if (isUsingMock) {
+    if (period) mockDb.shifts = (mockDb.shifts || []).filter(s => s.period !== period);
+    else mockDb.shifts = [];
+    return res.json({ success: true });
+  }
+  try {
+    const sql = getSql();
+    if (period) await sql('DELETE FROM shifts WHERE period = $1', [period]);
+    else await sql('DELETE FROM shifts');
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
