@@ -9,37 +9,63 @@ const pool = createPool({
 });
 
 async function ensureTables() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS doctors (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      gender TEXT NOT NULL,
-      "previousWards" TEXT NOT NULL
-    )
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS wards (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      requirements TEXT NOT NULL
-    )
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS assignments (
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      "wardId" TEXT NOT NULL,
-      "doctorIds" TEXT NOT NULL
-    )
-  `);
+  console.log('Ensuring database tables exist...');
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS doctors (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        gender TEXT NOT NULL,
+        "previousWards" TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wards (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        requirements TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS assignments (
+        id TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
+        "wardId" TEXT NOT NULL,
+        "doctorIds" TEXT NOT NULL
+      )
+    `);
+    console.log('Database tables ready.');
+  } catch (err) {
+    console.error('Error creating database tables:', err.message);
+    throw err;
+  }
 }
 
 // Ensure tables exist on every cold start (cached after first call)
 let tablesReady = null;
-function getTablesReady() {
-  if (!tablesReady) tablesReady = ensureTables();
+async function getTablesReady() {
+  if (!tablesReady) {
+    tablesReady = ensureTables().catch(err => {
+      tablesReady = null; // Reset so we can retry on next request
+      throw err;
+    });
+  }
   return tablesReady;
 }
+
+// Debug endpoint to check DB status
+app.get('/api/debug-db', async (req, res) => {
+  try {
+    await getTablesReady();
+    const { rows } = await pool.query('SELECT NOW() as now');
+    res.json({ status: 'connected', time: rows[0].now, env: { 
+      has_postgres_url: !!process.env.POSTGRES_URL,
+      has_database_url: !!process.env.DATABASE_URL 
+    }});
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 
 // --- Doctors ---
 app.get('/api/doctors', async (req, res) => {

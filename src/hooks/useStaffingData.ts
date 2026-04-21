@@ -20,13 +20,21 @@ export function useStaffingData() {
         fetch('/api/assignments')
       ]);
       
+      if (!docsResp.ok || !wardsResp.ok || !assignmentsResp.ok) {
+        throw new Error('Server returned an error while fetching data.');
+      }
+      
       const doctors = await docsResp.json();
       const wards = await wardsResp.json();
       const assignments = await assignmentsResp.json();
       
-      setData({ doctors, wards, assignments });
+      if (Array.isArray(doctors) && Array.isArray(wards) && Array.isArray(assignments)) {
+        setData({ doctors, wards, assignments });
+      } else {
+        console.error('Invalid data format received from server', { doctors, wards, assignments });
+      }
     } catch (e) {
-      console.error('Failed to fetch data from SQLite', e);
+      console.error('Failed to fetch data from Postgres:', e);
     } finally {
       setLoading(false);
     }
