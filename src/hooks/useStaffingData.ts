@@ -172,16 +172,12 @@ export function useStaffingData() {
           for (const assignment of assignments) {
               const ward = data.wards.find(w => w.id === assignment.wardId);
               if (!ward) continue;
-
-              // IF THIS IS A SUBORDINATE WARD: Skip it (its members are counted in the main ward)
               if (ward.parentWardId) continue;
 
-              // IF THIS IS A MAIN WARD: Get all subordinate assignments
               const subordinates = data.wards.filter(w => w.parentWardId === ward.id);
               const subAssignments = assignments.filter(a => subordinates.some(s => s.id === a.wardId));
-              
-              // Combined Pool: Main Ward Doctors + All Subordinate Ward Doctors
-              const combinedDoctorPool = [...assignment.doctorIds, ...subAssignments.flatMap(a => a.doctorIds)];
+              // Ensure pool is unique to prevent bias
+              const combinedDoctorPool = Array.from(new Set([...assignment.doctorIds, ...subAssignments.flatMap(a => a.doctorIds)]));
               
               if (combinedDoctorPool.length === 0) continue;
 
@@ -189,16 +185,41 @@ export function useStaffingData() {
               const shiftsPerDay = shiftDuration === '6h' ? 4 : shiftDuration === '12h' ? 2 : 1;
               const totalDailySlots = shiftsPerDay * staffPerShift;
 
+              // GLOBAL CIRCULAR QUEUE: Ensures every doctor works once before anyone repeats
+              let poolQueue = [...combinedDoctorPool].sort(() => Math.random() - 0.5);
+              let lastDayAssigned = new Set<string>();
+
               for (let day = 1; day <= daysInMonth; day++) {
-                  let available = [...combinedDoctorPool].sort(() => Math.random() - 0.5);
+                  const todayAssigned = new Set<string>();
                   for (let slot = 0; slot < totalDailySlots; slot++) {
-                      if (available.length === 0) available = [...combinedDoctorPool].sort(() => Math.random() - 0.5);
-                      const dId = available.pop()!;
+                      // SELECTION CRITERIA:
+                      // 1. Must not have worked earlier today
+                      // 2. Must not have worked yesterday (Rest Period Guard)
+                      // 3. Must be the next in line in the global fairness queue
+                      
+                      let eligible = poolQueue.filter(id => !todayAssigned.has(id) && !lastDayAssigned.has(id));
+                      
+                      // EMERGENCY FALLBACK: If rest period is impossible (pool too small), avoid same-day double shifts
+                      if (eligible.length === 0) {
+                          eligible = poolQueue.filter(id => !todayAssigned.has(id));
+                      }
+                      
+                      // CRITICAL FALLBACK: If everyone is already working today, pick from the queue
+                      if (eligible.length === 0) eligible = poolQueue;
+
+                      // Always pick the highest person in the queue who is eligible
+                      const dId = eligible[0];
+                      
+                      // Move to the very back of the circular queue
+                      poolQueue = [...poolQueue.filter(id => id !== dId), dId];
+                      
+                      todayAssigned.add(dId);
                       newShifts.push({ 
                           id: `${period}-${day}-${ward.id}-${slot}`, 
                           period, day, wardId: ward.id, slotIndex: slot, doctorId: dId 
                       });
                   }
+                  lastDayAssigned = todayAssigned;
               }
           }
 
@@ -218,7 +239,16 @@ export function useStaffingData() {
               alert(`Roster generated for ${daysInMonth} days.`);
           }
       } catch (e) { alert('Roster calculation failed.'); } finally { setSyncing(false); }
-  }, [data.assignments, wardMap]);
+  }, [data.assignments, data.wards, wardMap]);
+
+  const clearRosterByPeriod = useCallback(async (period: string) => {
+    setSyncing(true);
+    try {
+        await fetch('/api/shifts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ period }) });
+        setData(prev => ({ ...prev, shifts: prev.shifts.filter(s => s.period !== period) }));
+        alert(`Roster cleared for ${period}. Personnel pool remains intact.`);
+    } catch (e) { alert('Clear failed.'); } finally { setSyncing(false); }
+  }, []);
 
   const deleteDispatchByPeriod = useCallback(async (period: string) => {
     const toDelete = data.assignments.filter(a => a.period === period).map(a => a.id);
@@ -253,9 +283,55 @@ export function useStaffingData() {
     } catch (e) { alert('Update failed.'); } finally { setSyncing(false); }
   }, [doctorMap]);
 
+  const swapPoolDoctors = useCallback(async (period: string, wardA: string, docA: string, wardB: string, docB: string) => {
+    setSyncing(true);
+    try {
+        const assignments = data.assignments.filter(a => a.period === period);
+        const a1 = assignments.find(a => a.wardId === wardA);
+        const a2 = assignments.find(a => a.wardId === wardB);
+        if (!a1 || !a2) return;
+
+        const newA1 = { ...a1, doctorIds: a1.doctorIds.map(id => id === docA ? docB : id) };
+        const newA2 = { ...a2, doctorIds: a2.doctorIds.map(id => id === docB ? docA : id) };
+
+        await Promise.all([
+            fetch(`/api/assignments/${newA1.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newA1) }),
+            fetch(`/api/assignments/${newA2.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newA2) })
+        ]);
+
+        setData(prev => ({
+            ...prev,
+            assignments: prev.assignments.map(a => a.id === newA1.id ? newA1 : a.id === newA2.id ? newA2 : a)
+        }));
+    } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
+  }, [data.assignments]);
+
+  const swapShiftDoctors = useCallback(async (period: string, shiftIdA: string, shiftIdB: string) => {
+    setSyncing(true);
+    try {
+        const s1 = data.shifts.find(s => s.id === shiftIdA);
+        const s2 = data.shifts.find(s => s.id === shiftIdB);
+        if (!s1 || !s2) return;
+
+        const newS1 = { ...s1, doctorId: s2.doctorId };
+        const newS2 = { ...s2, doctorId: s1.doctorId };
+
+        await fetch('/api/shifts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify([newS1, newS2])
+        });
+
+        setData(prev => ({
+            ...prev,
+            shifts: prev.shifts.map(s => s.id === shiftIdA ? newS1 : s.id === shiftIdB ? newS2 : s)
+        }));
+    } catch (e) { alert('Shift swap failed.'); } finally { setSyncing(false); }
+  }, [data.shifts]);
+
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
   }, [executeAction]);
 
-  return { ...data, loading, syncing, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, deleteDispatchByPeriod, updateAssignment, importData, doctorMap, wardMap };
+  return { ...data, loading, syncing, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap };
 }
