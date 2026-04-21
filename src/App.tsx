@@ -25,6 +25,8 @@ export default function App() {
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const staffing = useStaffingData();
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   useEffect(() => {
       if (user) localStorage.setItem('wardstaffer_user', JSON.stringify(user));
       else localStorage.removeItem('wardstaffer_user');
@@ -48,46 +50,32 @@ export default function App() {
 
   if (!user) return <LoginPage onLogin={handleLogin} isLoading={staffing.loading} />;
 
-  const handleExport = () => {
-    const doctorsWs = XLSX.utils.json_to_sheet(staffing.doctors.map(d => ({ ID: d.id, Name: d.name, Gender: d.gender, PreviousWards: d.previousWards.join(', ') })));
-    const periods = [...new Set(staffing.assignments.map(a => a.period))].sort();
-    const gridRows: any[] = [];
-    periods.forEach(p => {
-        const periodAssignments = staffing.assignments.filter(a => a.period === p);
-        let maxDocs = 0; const wardToDocs: Record<string, string[]> = {};
-        staffing.wards.forEach(w => {
-            const assignment = periodAssignments.find(a => a.wardId === w.id);
-            const docNames = (assignment?.doctorIds || []).map(id => staffing.doctorMap.get(id)?.name || 'Unknown');
-            wardToDocs[w.name] = docNames; maxDocs = Math.max(maxDocs, docNames.length);
-        });
-        for (let i = 0; i < maxDocs; i++) {
-            const row: any = { 'Month': i === 0 ? p : '' };
-            staffing.wards.forEach(w => { row[w.name] = wardToDocs[w.name][i] || ''; });
-            gridRows.push(row);
-        }
-        gridRows.push({});
-    });
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(gridRows), "Monthly Grid");
-    XLSX.utils.book_append_sheet(wb, doctorsWs, "Registry");
-    XLSX.writeFile(wb, `Hospital_Dispatch_${new Date().toISOString().slice(0, 7)}.xlsx`);
-  };
-
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      <aside className="w-64 bg-slate-900 text-white flex flex-col h-full border-r border-slate-200 z-10 shrink-0">
+      {/* Mobile Backdrop */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 lg:hidden"
+          />
+        )}
+      </AnimatePresence>
+
+      <aside className={`fixed lg:static inset-y-0 left-0 w-64 bg-slate-900 text-white flex flex-col h-full border-r border-slate-200 z-50 transition-transform duration-300 transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} shrink-0`}>
         <div className="p-6 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-2"><div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-white shadow-lg">W</div><span className="text-xl font-semibold tracking-tight">WardStaffer</span></div>
-          {user.role === 'admin' && <Shield className="w-4 h-4 text-amber-500" />}
+          <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 hover:bg-slate-800 rounded text-slate-400"><X className="w-5 h-5" /></button>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          <NavItem active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} label="Overview" icon={<ClipboardList className="w-4 h-4" />} />
-          <NavItem active={currentView === 'profile'} onClick={() => setCurrentView('profile')} label="My Profile" icon={<User className="w-4 h-4" />} />
+          <NavItem active={currentView === 'dashboard'} onClick={() => { setCurrentView('dashboard'); setSidebarOpen(false); }} label="Overview" icon={<ClipboardList className="w-4 h-4" />} />
+          <NavItem active={currentView === 'profile'} onClick={() => { setCurrentView('profile'); setSidebarOpen(false); }} label="My Profile" icon={<User className="w-4 h-4" />} />
           <div className="h-px bg-slate-800 my-4"></div>
-          <NavItem active={currentView === 'doctors'} onClick={() => setCurrentView('doctors')} label="Staff Registry" icon={<Users className="w-4 h-4" />} />
-          <NavItem active={currentView === 'wards'} onClick={() => setCurrentView('wards')} label="Ward Config" icon={<Hospital className="w-4 h-4" />} />
-          <NavItem active={currentView === 'calendar'} onClick={() => setCurrentView('calendar')} label="Shift Calendar" icon={<Calendar className="w-4 h-4" />} />
-          <NavItem active={currentView === 'archive'} onClick={() => { setCurrentView('archive'); setSelectedPeriod(null); }} label="Archives & Roster" icon={<Archive className="w-4 h-4" />} />
+          <NavItem active={currentView === 'doctors'} onClick={() => { setCurrentView('doctors'); setSidebarOpen(false); }} label="Staff Registry" icon={<Users className="w-4 h-4" />} />
+          <NavItem active={currentView === 'wards'} onClick={() => { setCurrentView('wards'); setSidebarOpen(false); }} label="Ward Config" icon={<Hospital className="w-4 h-4" />} />
+          <NavItem active={currentView === 'calendar'} onClick={() => { setCurrentView('calendar'); setSidebarOpen(false); }} label="Shift Calendar" icon={<Calendar className="w-4 h-4" />} />
+          <NavItem active={currentView === 'archive'} onClick={() => { setCurrentView('archive'); setSelectedPeriod(null); setSidebarOpen(false); }} label="Archives & Roster" icon={<Archive className="w-4 h-4" />} />
         </nav>
         <div className="p-6 border-t border-slate-800 bg-slate-950/50">
           <div className="space-y-4">
@@ -97,20 +85,31 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between shadow-sm shrink-0 z-20">
-          <div className="flex items-center space-x-3"><h1 className="text-lg font-semibold text-slate-800 capitalize">{currentView}</h1><div className="h-4 w-[1px] bg-slate-200"></div><div className="flex items-center text-[10px] text-slate-400 uppercase font-bold tracking-wider"><span>{user.role}</span><ChevronRight className="w-3 h-3" /> <span className="text-blue-600">{currentView}</span></div></div>
+      <main className="flex-1 flex flex-col overflow-hidden w-full">
+        <header className="h-16 bg-white border-b border-slate-200 px-4 lg:px-8 flex items-center justify-between shadow-sm shrink-0 z-20">
+          <div className="flex items-center space-x-3">
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 hover:bg-slate-50 rounded-lg border border-slate-200 mr-1"><ListChecks className="w-5 h-5 text-slate-600" /></button>
+            <h1 className="text-sm lg:text-lg font-semibold text-slate-800 capitalize truncate">{currentView}</h1>
+            <div className="hidden sm:block h-4 w-[1px] bg-slate-200"></div>
+            <div className="hidden sm:flex items-center text-[10px] text-slate-400 uppercase font-bold tracking-wider"><span>{user.role}</span><ChevronRight className="w-3 h-3" /> <span className="text-blue-600">{currentView}</span></div>
+          </div>
           {staffing.syncing && (<div className="flex items-center space-x-2 bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-[10px] font-bold animate-pulse"><RefreshCw className="w-3 h-3 animate-spin" /><span>Syncing...</span></div>)}
         </header>
-        <div className="flex-1 overflow-y-auto p-8 bg-slate-50"><div className="max-w-7xl mx-auto"><AnimatePresence mode="wait"><motion.div key={currentView + selectedPeriod} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
-          {currentView === 'dashboard' && <DashboardView staffing={staffing} user={user} />}
-          {currentView === 'calendar' && <ShiftCalendarView staffing={staffing} />}
-          {currentView === 'doctors' && <DoctorsView staffing={staffing} user={user} />}
-          {currentView === 'wards' && <WardsView staffing={staffing} user={user} />}
-          {currentView === 'archive' && <MonthlyArchiveView staffing={staffing} user={user} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} />}
-          {currentView === 'assignments' && <AssignmentsView staffing={staffing} />}
-          {currentView === 'profile' && <ProfileView staffing={staffing} user={user} />}
-        </motion.div></AnimatePresence></div></div>
+        <div className="flex-1 overflow-y-auto p-4 lg:p-8 bg-slate-50">
+          <div className="max-w-7xl mx-auto">
+            <AnimatePresence mode="wait">
+              <motion.div key={currentView + (selectedPeriod || '')} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
+                {currentView === 'dashboard' && <DashboardView staffing={staffing} user={user} />}
+                {currentView === 'calendar' && <ShiftCalendarView staffing={staffing} />}
+                {currentView === 'doctors' && <DoctorsView staffing={staffing} user={user} />}
+                {currentView === 'wards' && <WardsView staffing={staffing} user={user} />}
+                {currentView === 'archive' && <MonthlyArchiveView staffing={staffing} user={user} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} />}
+                {currentView === 'assignments' && <AssignmentsView staffing={staffing} />}
+                {currentView === 'profile' && <ProfileView staffing={staffing} user={user} />}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
       </main>
     </div>
   );
