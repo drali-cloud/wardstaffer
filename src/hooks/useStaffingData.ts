@@ -349,7 +349,8 @@ export function useStaffingData() {
         const categories = [
             { id: 'er-men', name: 'Men', slots: [2, 4, 4, 2], wards: config.men, duration: 6 },
             { id: 'er-women', name: 'Women', slots: [2, 4, 4, 2], wards: config.women, duration: 6 },
-            { id: 'er-pediatric', name: 'Pediatric', slots: [1, 1, 1], wards: config.pediatric, duration: 8 } // Assuming 1 for peds for now or keep default
+            { id: 'er-pediatric', name: 'Pediatric', slots: [1, 1, 1], wards: config.pediatric, duration: 8 },
+            { id: 'er-referral', name: 'Daily Referral', slots: [1], wards: [...config.men, ...config.women, ...config.pediatric], duration: 24, maleOnly: true }
         ];
 
         // Track cumulative hours per doctor for the period
@@ -369,8 +370,12 @@ export function useStaffingData() {
 
                 cat.slots.forEach((staffCount, slotIdx) => {
                     for (let s = 0; s < staffCount; s++) {
-                        const eligible = poolArray
+                        // Pass 1: Strict (with rest periods)
+                        let eligible = poolArray
                             .filter(candidate => {
+                                const doc = doctorMap.get(candidate);
+                                if (cat.maleOnly && doc?.gender !== 'Male') return false;
+
                                 const hasWardShiftToday = wardShifts.some(s => s.day === day && s.doctorId === candidate);
                                 const hasWardShiftYesterday = wardShifts.some(s => s.day === day - 1 && s.doctorId === candidate);
                                 const hasWardShiftTomorrow = wardShifts.some(s => s.day === day + 1 && s.doctorId === candidate);
@@ -378,6 +383,20 @@ export function useStaffingData() {
                                 return !hasWardShiftToday && !hasWardShiftYesterday && !hasWardShiftTomorrow && !hasOtherERToday;
                             })
                             .sort((a, b) => hoursMap[a] - hoursMap[b]);
+
+                        // Pass 2: Relaxed (No same-day conflict only)
+                        if (eligible.length === 0) {
+                            eligible = poolArray
+                                .filter(candidate => {
+                                    const doc = doctorMap.get(candidate);
+                                    if (cat.maleOnly && doc?.gender !== 'Male') return false;
+
+                                    const hasWardShiftToday = wardShifts.some(s => s.day === day && s.doctorId === candidate);
+                                    const hasOtherERToday = newERShifts.some(s => s.day === day && s.doctorId === candidate);
+                                    return !hasWardShiftToday && !hasOtherERToday;
+                                })
+                                .sort((a, b) => hoursMap[a] - hoursMap[b]);
+                        }
 
                         if (eligible.length > 0) {
                             const candidate = eligible[0];
