@@ -177,4 +177,33 @@ app.post('/api/import', async (req, res) => {
   }
 });
 
+// --- Update Routes ---
+app.put('/api/doctors/:id', async (req, res) => {
+  try {
+    await getTablesReady();
+    const { name, gender, previousWards } = req.body;
+    await pool.query(
+      'UPDATE doctors SET name = $1, gender = $2, "previousWards" = $3 WHERE id = $4',
+      [name, gender, JSON.stringify(previousWards), req.params.id]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/wards/:id', async (req, res) => {
+  try {
+    await getTablesReady();
+    const { name, requirements } = req.body;
+    await pool.query(
+      'UPDATE wards SET name = $1, requirements = $2 WHERE id = $3',
+      [name, JSON.stringify(requirements), req.params.id]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default app;

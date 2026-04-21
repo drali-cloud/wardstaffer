@@ -9,7 +9,8 @@ import {
   Download,
   Calendar,
   ChevronRight,
-  UserPlus
+  UserPlus,
+  Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
@@ -65,15 +66,17 @@ export default function App() {
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         
-        // Import Doctors
-        const docWs = wb.Sheets["Doctors"];
+        // Find the sheet: either "Doctors" or the first available sheet
+        const sheetName = wb.SheetNames.includes("Doctors") ? "Doctors" : wb.SheetNames[0];
+        const docWs = wb.Sheets[sheetName];
+
         if (docWs) {
             const docData = XLSX.utils.sheet_to_json(docWs) as any[];
             const importedDoctors: Doctor[] = docData.map(d => ({
-                id: d.ID?.toString() || Math.random().toString(36).substr(2, 9),
-                name: d.Name || "Unnamed Doctor",
-                gender: (d.Gender as Gender) || "Other",
-                previousWards: d.PreviousWards ? d.PreviousWards.toString().split(',').map((s: string) => s.trim()) : []
+                id: Math.random().toString(36).substr(2, 9),
+                name: d.name || d.Name || "Unnamed Doctor",
+                gender: (d.gender || d.Gender || "Other") as Gender,
+                previousWards: d.pw || d.PreviousWards ? (d.pw || d.PreviousWards).toString().split(',').map((s: string) => s.trim()) : []
             }));
             staffing.importData({ doctors: importedDoctors });
         }
@@ -285,19 +288,37 @@ function DashboardView({ staffing }: { staffing: any }) {
 }
 
 function DoctorsView({ staffing }: { staffing: any }) {
-  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [newDoctor, setNewDoctor] = useState<Partial<Doctor>>({ name: '', gender: 'Male', previousWards: [] });
 
   const handleAdd = () => {
       if (!newDoctor.name) return;
-      staffing.addDoctor({
-          id: Math.random().toString(36).substr(2, 9),
-          name: newDoctor.name,
-          gender: newDoctor.gender as Gender,
-          previousWards: newDoctor.previousWards || []
-      });
+      
+      if (editingId) {
+          staffing.updateDoctor({
+              id: editingId,
+              name: newDoctor.name,
+              gender: newDoctor.gender as Gender,
+              previousWards: newDoctor.previousWards || []
+          });
+          setEditingId(null);
+      } else {
+          staffing.addDoctor({
+              id: Math.random().toString(36).substr(2, 9),
+              name: newDoctor.name,
+              gender: newDoctor.gender as Gender,
+              previousWards: newDoctor.previousWards || []
+          });
+      }
+      
       setShowAdd(false);
       setNewDoctor({ name: '', gender: 'Male', previousWards: [] });
+  };
+
+  const startEdit = (doctor: Doctor) => {
+      setEditingId(doctor.id);
+      setNewDoctor(doctor);
+      setShowAdd(true);
   };
 
   return (
@@ -307,7 +328,13 @@ function DoctorsView({ staffing }: { staffing: any }) {
             <h2 className="text-xl font-bold tracking-tight text-slate-800">Personnel Registry</h2>
             <p className="text-xs text-slate-500 mt-1">Comprehensive database of credentialed medical staff.</p>
         </div>
-        <button className="btn-primary" onClick={() => setShowAdd(!showAdd)}>
+        <button className="btn-primary" onClick={() => {
+            if (showAdd && editingId) {
+                setEditingId(null);
+                setNewDoctor({ name: '', gender: 'Male', previousWards: [] });
+            }
+            setShowAdd(!showAdd);
+        }}>
             <UserPlus className="w-4 h-4" /> {showAdd ? 'Collapse Portal' : 'Register Physician'}
         </button>
       </div>
@@ -337,12 +364,22 @@ function DoctorsView({ staffing }: { staffing: any }) {
                           </div>
                           <div className="space-y-1">
                               <label>Experience Matrix (Ward IDs)</label>
-                              <input type="text" placeholder="ER, Oncology, etc" className="w-full" onChange={e => setNewDoctor(prev => ({ ...prev, previousWards: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} />
+                              <input 
+                                type="text" 
+                                placeholder="ER, Oncology, etc" 
+                                className="w-full" 
+                                value={newDoctor.previousWards?.join(', ') || ''} 
+                                onChange={e => setNewDoctor(prev => ({ ...prev, previousWards: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} 
+                              />
                           </div>
                       </div>
-                      <div className="flex gap-3 mt-8 pt-6 border-t border-slate-100">
-                        <button className="btn-primary px-8" onClick={handleAdd}>Confirm Entry</button>
-                        <button className="btn-secondary" onClick={() => setShowAdd(false)}>Discard</button>
+                       <div className="flex gap-3 mt-8 pt-6 border-t border-slate-100">
+                        <button className="btn-primary px-8" onClick={handleAdd}>{editingId ? 'Update Entry' : 'Confirm Entry'}</button>
+                        <button className="btn-secondary" onClick={() => {
+                            setShowAdd(false);
+                            setEditingId(null);
+                            setNewDoctor({ name: '', gender: 'Male', previousWards: [] });
+                        }}>Discard</button>
                       </div>
                   </div>
               </motion.div>
@@ -374,7 +411,10 @@ function DoctorsView({ staffing }: { staffing: any }) {
                                     {d.gender}
                                 </span>
                             </td>
-                            <td className="px-6 py-4 text-right">
+                             <td className="px-6 py-4 text-right flex justify-end gap-2">
+                                <button className="p-2 text-slate-400 hover:text-blue-600 transition-colors opacity-0 group-hover:opacity-100" onClick={() => startEdit(d)}>
+                                    <Edit2 className="w-4 h-4" />
+                                </button>
                                 <button className="btn-danger opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => staffing.deleteDoctor(d.id)}>
                                     <Trash2 className="w-4 h-4" />
                                 </button>
@@ -390,7 +430,7 @@ function DoctorsView({ staffing }: { staffing: any }) {
 }
 
 function WardsView({ staffing }: { staffing: any }) {
-    const [showAdd, setShowAdd] = useState(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [newWard, setNewWard] = useState<Partial<Ward>>({ 
         name: '', 
         requirements: { totalDoctors: 2, genderDiversity: 'None' } 
@@ -398,8 +438,9 @@ function WardsView({ staffing }: { staffing: any }) {
 
     const handleAdd = () => {
         if (!newWard.name) return;
-        staffing.addWard({
-            id: `ward-${Math.random().toString(36).substr(2, 5)}`,
+        
+        const wardData = {
+            id: editingId || `ward-${Math.random().toString(36).substr(2, 5)}`,
             name: newWard.name,
             requirements: {
                 totalDoctors: newWard.requirements?.totalDoctors || 2,
@@ -407,9 +448,23 @@ function WardsView({ staffing }: { staffing: any }) {
                 requiredMale: newWard.requirements?.requiredMale,
                 requiredFemale: newWard.requirements?.requiredFemale
             }
-        });
+        };
+
+        if (editingId) {
+            staffing.updateWard(wardData);
+            setEditingId(null);
+        } else {
+            staffing.addWard(wardData);
+        }
+
         setShowAdd(false);
         setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None' } });
+    };
+
+    const startEdit = (ward: Ward) => {
+        setEditingId(ward.id);
+        setNewWard(ward);
+        setShowAdd(true);
     };
 
     return (
@@ -419,7 +474,13 @@ function WardsView({ staffing }: { staffing: any }) {
               <h2 className="text-xl font-bold tracking-tight text-slate-800">Unit Specialization</h2>
               <p className="text-xs text-slate-500 mt-1">Configure clinical units and precision staffing metrics.</p>
           </div>
-          <button className="btn-primary" onClick={() => setShowAdd(!showAdd)}>
+          <button className="btn-primary" onClick={() => {
+              if (showAdd && editingId) {
+                  setEditingId(null);
+                  setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None' } });
+              }
+              setShowAdd(!showAdd);
+          }}>
               <Plus className="w-4 h-4" /> {showAdd ? 'Close Builder' : 'Initialize Ward'}
           </button>
         </div>
@@ -460,9 +521,13 @@ function WardsView({ staffing }: { staffing: any }) {
                                 </>
                             )}
                         </div>
-                        <div className="flex gap-3 pt-6 border-t border-slate-100 text-xs">
-                          <button className="btn-primary" onClick={handleAdd}>Operationalize Ward</button>
-                          <button className="btn-secondary" onClick={() => setShowAdd(false)}>Abort</button>
+                         <div className="flex gap-3 pt-6 border-t border-slate-100 text-xs">
+                          <button className="btn-primary" onClick={handleAdd}>{editingId ? 'Update Metrics' : 'Operationalize Ward'}</button>
+                          <button className="btn-secondary" onClick={() => {
+                              setShowAdd(false);
+                              setEditingId(null);
+                              setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None' } });
+                          }}>Abort</button>
                         </div>
                     </div>
                 </motion.div>
@@ -496,7 +561,10 @@ function WardsView({ staffing }: { staffing: any }) {
                                       <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-tight">{w.requirements.genderDiversity}</span>
                                   </div>
                               </td>
-                              <td className="px-6 py-4 text-right">
+                               <td className="px-6 py-4 text-right flex justify-end gap-2">
+                                  <button className="p-2 text-slate-400 hover:text-blue-600 transition-colors opacity-0 group-hover:opacity-100" onClick={() => startEdit(w)}>
+                                      <Edit2 className="w-4 h-4" />
+                                  </button>
                                   <button className="btn-danger opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => staffing.deleteWard(w.id)}>
                                       <Trash2 className="w-4 h-4" />
                                   </button>

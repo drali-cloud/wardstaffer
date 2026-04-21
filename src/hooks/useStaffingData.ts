@@ -225,13 +225,47 @@ export function useStaffingData() {
     }
   }, []);
 
+  const updateDoctor = useCallback(async (doctor: Doctor) => {
+    try {
+        await fetch(`/api/doctors/${doctor.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(doctor)
+        });
+        setData(prev => ({
+            ...prev,
+            doctors: prev.doctors.map(d => d.id === doctor.id ? doctor : d)
+        }));
+    } catch (e) {
+        console.error('Failed to update doctor', e);
+    }
+  }, []);
+
+  const updateWard = useCallback(async (ward: Ward) => {
+    try {
+        await fetch(`/api/wards/${ward.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ward)
+        });
+        setData(prev => ({
+            ...prev,
+            wards: prev.wards.map(w => w.id === ward.id ? ward : w)
+        }));
+    } catch (e) {
+        console.error('Failed to update ward', e);
+    }
+  }, []);
+
   return {
     ...data,
     loading,
     addDoctor,
     deleteDoctor,
+    updateDoctor,
     addWard,
     deleteWard,
+    updateWard,
     generateAssignments,
     importData,
     clearAssignments
