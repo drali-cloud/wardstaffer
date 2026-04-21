@@ -1,0 +1,6 @@
+{
+  "name": "WardStaffer",
+  "description": "Hospital ward staffing and scheduling system with automated doctor assignment, gender diversity requirements, and Excel import/export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
