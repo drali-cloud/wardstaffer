@@ -12,6 +12,7 @@ export function useStaffingData() {
   const [data, setData] = useState<StaffingData>({ doctors: [], wards: [], assignments: [], shifts: [] });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[] }>({ men: [], women: [], pediatric: [] });
 
   const doctorMap = useMemo(() => new Map(data.doctors.map(d => [d.id, d])), [data.doctors]);
   const wardMap = useMemo(() => new Map(data.wards.map(w => [w.id, w])), [data.wards]);
@@ -19,12 +20,12 @@ export function useStaffingData() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [docsResp, wardsResp, assignmentsResp, shiftsResp] = await Promise.all([
-        fetch('/api/doctors'), fetch('/api/wards'), fetch('/api/assignments'), fetch('/api/shifts')
+      const [docsResp, wardsResp, assignmentsResp, shiftsResp, configResp] = await Promise.all([
+        fetch('/api/doctors'), fetch('/api/wards'), fetch('/api/assignments'), fetch('/api/shifts'), fetch('/api/config')
       ]);
       if (!docsResp.ok) throw new Error('Sync failed.');
-      const [doctors, wards, assignments, shifts] = await Promise.all([
-        docsResp.json(), wardsResp.json(), assignmentsResp.json(), shiftsResp.json()
+      const [doctors, wards, assignments, shifts, config] = await Promise.all([
+        docsResp.json(), wardsResp.json(), assignmentsResp.json(), shiftsResp.json(), configResp.json()
       ]);
       setData({ 
           doctors: doctors || [], 
@@ -32,10 +33,19 @@ export function useStaffingData() {
           assignments: assignments || [], 
           shifts: shifts || [] 
       });
+      setErConfig(config || { men: [], women: [], pediatric: [] });
     } catch (e) { console.error('Fetch error:', e); } finally { setLoading(false); }
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  const updateERConfig = useCallback(async (newConfig: { men: string[], women: string[], pediatric: string[] }) => {
+    setSyncing(true);
+    try {
+        await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newConfig) });
+        setErConfig(newConfig);
+    } catch (e) { alert('Failed to save configuration.'); } finally { setSyncing(false); }
+  }, []);
 
   const executeAction = useCallback(async (action: () => Promise<Response>, onSuccess: () => void, errorMsg: string) => {
     setSyncing(true);
@@ -401,5 +411,5 @@ export function useStaffingData() {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
   }, [executeAction]);
 
-  return { ...data, loading, syncing, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap };
+  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap };
 }

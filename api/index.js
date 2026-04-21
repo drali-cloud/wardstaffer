@@ -29,13 +29,15 @@ async function ensureTables() {
     sql(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, password TEXT, "previousWards" TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL, "parentWardId" TEXT)`),
     sql(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, period TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`),
-    sql(`CREATE TABLE IF NOT EXISTS shifts (id TEXT PRIMARY KEY, period TEXT NOT NULL, day INTEGER NOT NULL, "wardId" TEXT NOT NULL, "slotIndex" INTEGER NOT NULL, "doctorId" TEXT NOT NULL)`)
+    sql(`CREATE TABLE IF NOT EXISTS shifts (id TEXT PRIMARY KEY, period TEXT NOT NULL, day INTEGER NOT NULL, "wardId" TEXT NOT NULL, "slotIndex" INTEGER NOT NULL, "doctorId" TEXT NOT NULL)`),
+    sql(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
   ]);
   // Migrations: Ensure newer columns exist in existing tables
   try { await sql(`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS password TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE wards ADD COLUMN IF NOT EXISTS "parentWardId" TEXT`); } catch(e){}
+  try { await sql(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); } catch(e){}
   // Clean up legacy columns that might cause NOT NULL violations
   try { await sql(`ALTER TABLE assignments ALTER COLUMN "date" DROP NOT NULL`); } catch(e){}
   try { await sql(`ALTER TABLE assignments DROP COLUMN IF EXISTS "date"`); } catch(e){}
@@ -381,6 +383,26 @@ app.get('/api/debug-db', async (req, res) => {
   } catch (e) {
     res.json({ status: 'error', message: e.message, mode: 'mock' });
   }
+});
+
+app.get('/api/config', async (req, res) => {
+    await getTablesReady();
+    if (isUsingMock) return res.json({ men: [], women: [], pediatric: [] });
+    try {
+        const sql = getSql();
+        const rows = await sql('SELECT value FROM settings WHERE key = $1', ['er_config']);
+        res.json(rows[0]?.value ? JSON.parse(rows[0].value) : { men: [], women: [], pediatric: [] });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/config', async (req, res) => {
+    await getTablesReady();
+    if (isUsingMock) return res.json({ success: true });
+    try {
+        const sql = getSql();
+        await sql('INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', ['er_config', JSON.stringify(req.body)]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 export default app;

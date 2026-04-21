@@ -239,7 +239,6 @@ function ShiftCalendarView({ staffing }: { staffing: any }) {
 function ERCallsView({ staffing }: { staffing: any }) {
     const [viewDate, setViewDate] = useState(new Date());
     const [selectedDay, setSelectedDay] = useState<number | null>(null);
-    const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[] }>({ men: [], women: [], pediatric: [] });
     const [dragSourceWard, setDragSourceWard] = useState<string | null>(null);
 
     const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
@@ -250,18 +249,23 @@ function ERCallsView({ staffing }: { staffing: any }) {
 
     const handleDrop = (cat: 'men' | 'women' | 'pediatric') => {
         if (!dragSourceWard) return;
-        setErConfig(prev => {
-            if (prev[cat].includes(dragSourceWard)) return prev;
-            return { ...prev, [cat]: [...prev[cat], dragSourceWard] };
-        });
+        const newConfig = { ...staffing.erConfig };
+        if (newConfig[cat].includes(dragSourceWard)) return;
+        newConfig[cat] = [...newConfig[cat], dragSourceWard];
+        staffing.updateERConfig(newConfig);
         setDragSourceWard(null);
+    };
+
+    const handleClear = (cat: 'men' | 'women' | 'pediatric') => {
+        const newConfig = { ...staffing.erConfig, [cat]: [] };
+        staffing.updateERConfig(newConfig);
     };
 
     return (
         <div className="space-y-8 pb-20">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4"><div className="bg-amber-50 p-3 rounded-xl text-amber-600"><Activity className="w-6 h-6" /></div><div><h2 className="text-xl font-bold text-slate-800">ER On-Call Center</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Multi-Departmental Rotation Control</p></div></div>
-                <div className="flex items-center gap-2"><div className="flex gap-1 mr-4"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div><button onClick={() => staffing.calculateERCalls(period, erConfig)} className="flex items-center gap-2 text-xs font-bold uppercase bg-amber-600 text-white px-6 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-4 h-4" /> Calculate ER Calls</button></div>
+                <div className="flex items-center gap-2"><div className="flex gap-1 mr-4"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div><button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex items-center gap-2 text-xs font-bold uppercase bg-amber-600 text-white px-6 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-4 h-4" /> Calculate ER Calls</button></div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -277,13 +281,13 @@ function ERCallsView({ staffing }: { staffing: any }) {
                     <div key={cat} onDragOver={e => e.preventDefault()} onDrop={() => handleDrop(cat)} className="bg-white p-6 rounded-2xl border-2 border-dashed border-slate-200 hover:border-amber-400 hover:bg-amber-50/30 transition-all relative min-h-[150px]">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><Users className="w-4 h-4 text-amber-500" /> {cat} ER Pool</h3>
-                            <button onClick={() => setErConfig(prev => ({ ...prev, [cat]: [] }))} className="text-[9px] font-bold text-slate-400 hover:text-red-600 uppercase">Clear</button>
+                            <button onClick={() => handleClear(cat)} className="text-[9px] font-bold text-slate-400 hover:text-red-600 uppercase">Clear</button>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                            {erConfig[cat].map(wId => (
+                            {staffing.erConfig[cat]?.map((wId: string) => (
                                 <div key={wId} className="px-2 py-1 bg-amber-100 border border-amber-200 rounded text-[9px] font-bold text-amber-700 uppercase">{staffing.wardMap.get(wId)?.name}</div>
                             ))}
-                            {erConfig[cat].length === 0 && <p className="text-[10px] text-slate-400 italic">Drag wards here...</p>}
+                            {(!staffing.erConfig[cat] || staffing.erConfig[cat].length === 0) && <p className="text-[10px] text-slate-400 italic">Drag wards here...</p>}
                         </div>
                     </div>
                 ))}
