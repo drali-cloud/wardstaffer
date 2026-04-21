@@ -1,4 +1,4 @@
-export type Gender = 'Male' | 'Female' | 'Other' | 'Prefer not to say';
+export type Gender = 'Male' | 'Female';
 
 export interface Doctor {
   id: string;

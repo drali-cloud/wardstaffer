@@ -287,6 +287,23 @@ export function useStaffingData() {
     );
   }, [executeAction]);
 
+  const generateMonthAssignments = useCallback(async (year: number, month: number) => {
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const assignments: Assignment[] = [];
+    
+    setSyncing(true);
+    try {
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const daily = await generateAssignments(dateStr);
+            assignments.push(...daily);
+        }
+        return assignments;
+    } finally {
+        setSyncing(false);
+    }
+  }, [generateAssignments]);
+
   return {
     ...data,
     loading,
@@ -298,6 +315,7 @@ export function useStaffingData() {
     deleteWard,
     updateWard,
     generateAssignments,
+    generateMonthAssignments,
     importData,
     clearAssignments,
     doctorMap,

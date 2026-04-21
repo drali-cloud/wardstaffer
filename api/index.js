@@ -24,12 +24,14 @@ function getSql() {
 
 async function ensureTables() {
   const sql = getSql();
-  // Execute all table creations in parallel for speed
+  // Execute all table creations in parallel
   await Promise.all([
-    sql(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, "previousWards" TEXT NOT NULL)`),
+    sql(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, password TEXT, "previousWards" TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, date TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`)
   ]);
+  // Migration: Ensure password column exists if table was already created
+  try { await sql(`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS password TEXT`); } catch(e){}
 }
 
 let tablesReady = null;
@@ -55,13 +57,14 @@ async function getTablesReady() {
 async function upsertDoctor(d) {
     const sql = getSql();
     await sql(`
-        INSERT INTO doctors (id, name, gender, "previousWards") 
-        VALUES ($1, $2, $3, $4) 
+        INSERT INTO doctors (id, name, gender, password, "previousWards") 
+        VALUES ($1, $2, $3, $4, $5) 
         ON CONFLICT (id) DO UPDATE SET 
             name = EXCLUDED.name, 
             gender = EXCLUDED.gender, 
+            password = EXCLUDED.password,
             "previousWards" = EXCLUDED."previousWards"
-    `, [d.id, d.name, d.gender, JSON.stringify(d.previousWards)]);
+    `, [d.id, d.name, d.gender, d.password || null, JSON.stringify(d.previousWards)]);
 }
 
 async function upsertWard(w) {
