@@ -9,12 +9,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function startServer() {
   const PORT = process.env.PORT || 3000;
-  const app = express(); // Create an express app instance here.
+  const app = express();
 
-  // IMPORTANT: Mount API routes BEFORE static/catch-all
   app.use(apiRoutes);
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -24,13 +22,13 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => { // Use app.get('*') to handle all routes
+    app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
   app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log('Server running');
   });
 }
 
