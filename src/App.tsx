@@ -242,16 +242,66 @@ function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => 
 function ProfileView({ staffing, user }: { staffing: any, user: AuthUser }) {
     const doctor = staffing.doctors.find((d: any) => d.name === user.name);
     const myAssignments = staffing.assignments.filter((a: any) => a.doctorIds.includes(user.id)).sort((a: any, b: any) => b.period.localeCompare(a.period));
+    const [viewDate, setViewDate] = useState(new Date());
+    const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
+    const myShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.doctorId === user.id);
+    
+    const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
+    const firstDayIdx = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
+
     const [newPass, setNewPass] = useState('');
     return (
         <div className="space-y-8">
             <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
                 <div className="flex items-center space-x-6"><div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center text-3xl font-bold text-blue-600 border border-blue-100">{user.name.charAt(0)}</div><div><h2 className="text-2xl font-bold text-slate-900">{user.name}</h2><div className="flex items-center gap-3 mt-2"><span className="px-3 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase rounded-full">ID: {user.id}</span><span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-bold uppercase rounded-full">{user.role}</span></div></div></div>
-                {user.id !== 'root' && (<div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Access Key</label><div className="flex gap-2"><input type="password" value={newPass} onChange={e => setNewPass(e.target.value)} className="text-xs p-2 rounded-lg border border-slate-200" /><button onClick={() => staffing.updateDoctor({ ...doctor, password: newPass })} className="bg-blue-600 text-white p-2 rounded-lg"><Key className="w-4 h-4" /></button></div></div>)}
+                {user.id !== 'root' && (<div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Access Key</label><div className="flex gap-2"><input type="password" placeholder="New Key" value={newPass} onChange={e => setNewPass(e.target.value)} className="text-xs p-2 rounded-lg border border-slate-200" /><button onClick={() => { staffing.updateDoctor({ ...doctor, password: newPass }); setNewPass(''); alert('Security Key Updated.'); }} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700"><Key className="w-4 h-4" /></button></div></div>)}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="technical-card p-6"><h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> Current Assignment</h3>{myAssignments[0] ? (<div className="p-4 bg-blue-50 rounded-xl border border-blue-100"><p className="text-[10px] uppercase text-blue-500 font-bold mb-1">Ward</p><p className="text-xl font-bold text-blue-900">{staffing.wardMap.get(myAssignments[0].wardId)?.name}</p><p className="text-xs text-blue-700 mt-4">Rotation Period: {myAssignments[0].period}</p></div>) : (<p className="text-xs text-slate-400 italic py-8 text-center">No assignment.</p>)}</div>
-                <div className="technical-card p-6"><h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><Clock className="w-4 h-4 text-blue-600" /> History</h3><div className="flex flex-wrap gap-2">{doctor?.previousWards?.map((wId: string) => (<span key={wId} className="px-3 py-1.5 bg-slate-100 text-slate-700 text-[10px] font-bold uppercase rounded-lg border border-slate-200">{staffing.wardMap.get(wId)?.name || wId}</span>)) || <p className="text-xs text-slate-400 italic">None.</p>}</div></div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-6">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center gap-3"><div className="bg-blue-50 p-2 rounded-lg text-blue-600"><Calendar className="w-5 h-5" /></div><div><h3 className="text-sm font-bold text-slate-800">My Duty Calendar</h3><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(viewDate)}</p></div></div>
+                            <div className="flex gap-1"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-1.5 hover:bg-slate-50 rounded border border-slate-200"><ArrowLeft className="w-3.5 h-3.5" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-1.5 hover:bg-slate-50 rounded border border-slate-200"><ArrowRight className="w-3.5 h-3.5" /></button></div>
+                        </div>
+                        <div className="grid grid-cols-7 gap-px bg-slate-100 rounded-xl overflow-hidden border border-slate-100">
+                            {['S','M','T','W','T','F','S'].map(d => (<div key={d} className="bg-slate-50/50 p-2 text-center text-[9px] font-bold text-slate-400">{d}</div>))}
+                            {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`e-${i}`} className="bg-white" />)}
+                            {Array.from({ length: daysInMonth }).map((_, i) => {
+                                const d = i + 1;
+                                const shift = myShifts.find((s: ShiftRecord) => s.day === d);
+                                return (
+                                    <div key={d} className={`min-h-[60px] p-1 border-t border-l border-slate-50 relative ${shift ? 'bg-blue-50/50' : 'bg-white'}`}>
+                                        <span className={`text-[9px] font-bold ${shift ? 'text-blue-600' : 'text-slate-400'}`}>{d}</span>
+                                        {shift && (
+                                            <div className="mt-1 p-1 bg-blue-600 rounded text-[7px] text-white font-bold uppercase leading-tight">
+                                                <p className="truncate">{staffing.wardMap.get(shift.wardId)?.name}</p>
+                                                <p className="opacity-80">Slot {shift.slotIndex + 1}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="space-y-6">
+                    <div className="technical-card p-6">
+                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> Dispatch Assignment</h3>
+                        {myAssignments[0] ? (
+                            <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                                <p className="text-[10px] uppercase text-blue-500 font-bold mb-1">Assigned Ward</p>
+                                <p className="text-xl font-bold text-blue-900">{staffing.wardMap.get(myAssignments[0].wardId)?.name}</p>
+                                <p className="text-xs text-blue-700 mt-4">Rotation: {myAssignments[0].period}</p>
+                            </div>
+                        ) : (<p className="text-xs text-slate-400 italic py-8 text-center">No active rotation.</p>)}
+                    </div>
+                    <div className="technical-card p-6">
+                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><Clock className="w-4 h-4 text-blue-600" /> Unit History</h3>
+                        <div className="flex flex-wrap gap-2">{doctor?.previousWards?.map((wId: string) => (<span key={wId} className="px-3 py-1.5 bg-slate-100 text-slate-700 text-[10px] font-bold uppercase rounded-lg border border-slate-200">{staffing.wardMap.get(wId)?.name || wId}</span>)) || <p className="text-xs text-slate-400 italic">None.</p>}</div>
+                    </div>
+                </div>
             </div>
         </div>
     );
