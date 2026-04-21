@@ -30,7 +30,7 @@ export default function App() {
       else localStorage.removeItem('wardstaffer_user');
   }, [user]);
 
-  const handleLogin = (name: string, pass: string) => {
+  const handleLogin = React.useCallback((name: string, pass: string) => {
       if (name === 'root' && pass === 'root') {
           setUser({ id: 'root', name: 'System Root', role: 'admin' });
           return true;
@@ -44,14 +44,14 @@ export default function App() {
           }
       }
       return false;
-  };
+  }, [staffing.doctors]);
 
-  const handleLogout = () => {
+  const handleLogout = React.useCallback(() => {
       setUser(null);
       setCurrentView('dashboard');
-  };
+  }, []);
 
-  if (!user) return <LoginPage onLogin={handleLogin} />;
+  if (!user) return <LoginPage onLogin={handleLogin} isLoading={staffing.loading} />;
 
   const handleExport = () => {
     const doctorsWs = XLSX.utils.json_to_sheet(staffing.doctors.map(d => ({ ID: d.id, Name: d.name, Gender: d.gender, PreviousWards: d.previousWards.join(', ') })));
@@ -147,18 +147,65 @@ export default function App() {
   );
 }
 
-function LoginPage({ onLogin }: { onLogin: (u: string, p: string) => boolean }) {
+function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => boolean, isLoading: boolean }) {
     const [name, setName] = useState(''); const [pass, setPass] = useState(''); const [error, setError] = useState(false);
-    const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (onLogin(name, pass)) setError(false); else setError(true); };
+    const handleSubmit = (e: React.FormEvent) => { 
+        e.preventDefault(); 
+        if (isLoading) return;
+        if (onLogin(name, pass)) setError(false); else setError(true); 
+    };
     return (
         <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl p-8 space-y-8">
-                <div className="text-center"><div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-600/20"><Hospital className="w-8 h-8 text-white" /></div><h1 className="text-2xl font-bold text-white">WardStaffer Portal</h1><p className="text-slate-500 text-sm mt-2">Clinical Deployment System</p></div>
+                <div className="text-center">
+                    <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-600/20">
+                        <Hospital className="w-8 h-8 text-white" />
+                    </div>
+                    <h1 className="text-2xl font-bold text-white">WardStaffer Portal</h1>
+                    <p className="text-slate-500 text-sm mt-2">Relational Clinical Deployment System</p>
+                </div>
                 <form onSubmit={handleSubmit} className="space-y-6">
-                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Staff Name</label><div className="relative"><User className="absolute left-3 top-3 w-4 h-4 text-slate-500" /><input type="text" placeholder="Full Registered Name" className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none" value={name} onChange={e => setName(e.target.value)} /></div></div>
-                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Security Access Key</label><div className="relative"><Lock className="absolute left-3 top-3 w-4 h-4 text-slate-500" /><input type="password" placeholder="Key" className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none" value={pass} onChange={e => setPass(e.target.value)} /></div></div>
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Staff Name</label>
+                        <div className="relative">
+                            <User className="absolute left-3 top-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
+                            <input 
+                                type="text" 
+                                placeholder="Full Registered Name" 
+                                className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none transition-all disabled:opacity-50" 
+                                value={name} 
+                                onChange={e => setName(e.target.value)} 
+                                disabled={isLoading}
+                            />
+                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Security Access Key</label>
+                        <div className="relative">
+                            <Lock className="absolute left-3 top-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
+                            <input 
+                                type="password" 
+                                placeholder="Key" 
+                                className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none transition-all disabled:opacity-50" 
+                                value={pass} 
+                                onChange={e => setPass(e.target.value)} 
+                                disabled={isLoading}
+                            />
+                        </div>
+                    </div>
                     {error && (<div className="bg-red-500/10 border border-red-500/50 text-red-500 text-[10px] uppercase font-bold p-3 rounded-lg flex items-center gap-2"><AlertCircle className="w-4 h-4" /> Invalid Credentials</div>)}
-                    <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all">Authenticate & Access</button>
+                    
+                    <button 
+                        type="submit" 
+                        disabled={isLoading}
+                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:bg-slate-700 flex items-center justify-center gap-2"
+                    >
+                        {isLoading ? (
+                            <><RefreshCw className="w-4 h-4 animate-spin" /> Syncing Database...</>
+                        ) : (
+                            "Authenticate & Access"
+                        )}
+                    </button>
                 </form>
             </div>
         </div>
