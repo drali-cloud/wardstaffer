@@ -17,8 +17,9 @@ const pool = createPool({
 });
 
 async function ensureTables() {
-  if (!process.env.DATABASE_URL && !process.env.POSTGRES_URL) {
-    throw new Error('No database connection string found.');
+  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!dbUrl) {
+    throw new Error('No database connection string found in environment variables.');
   }
   await pool.query('SELECT 1'); // Test connection
   
@@ -30,12 +31,15 @@ async function ensureTables() {
 let tablesReady = null;
 async function getTablesReady() {
   try {
-    if (!tablesReady) tablesReady = ensureTables();
+    if (!tablesReady) {
+      console.log('Attempting to connect to Postgres...');
+      tablesReady = ensureTables();
+    }
     await tablesReady;
     isUsingMock = false;
   } catch (err) {
     if (!isUsingMock) {
-      console.warn('DATABASE CONNECTION FAILED. Falling back to in-memory storage. Changes will be lost on restart.');
+      console.warn('DATABASE CONNECTION FAILED. Falling back to in-memory storage.');
       console.warn('Reason:', err.message);
     }
     isUsingMock = true;
@@ -58,11 +62,25 @@ app.post('/api/doctors', async (req, res) => {
   const { id, name, gender, previousWards } = req.body;
   if (isUsingMock) {
     mockDb.doctors.push({ id, name, gender, previousWards });
-    return res.json({ success: true, warning: 'Using mock storage' });
+    return res.json({ success: true, mode: 'mock' });
   }
   try {
     await pool.query('INSERT INTO doctors (id, name, gender, "previousWards") VALUES ($1, $2, $3, $4)', [id, name, gender, JSON.stringify(previousWards)]);
     res.status(201).json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/doctors/:id', async (req, res) => {
+  await getTablesReady();
+  const { name, gender, previousWards } = req.body;
+  if (isUsingMock) {
+    const idx = mockDb.doctors.findIndex(d => d.id === req.params.id);
+    if (idx > -1) mockDb.doctors[idx] = { id: req.params.id, name, gender, previousWards };
+    return res.json({ success: true });
+  }
+  try {
+    await pool.query('UPDATE doctors SET name = $1, gender = $2, "previousWards" = $3 WHERE id = $4', [name, gender, JSON.stringify(previousWards), req.params.id]);
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -98,6 +116,20 @@ app.post('/api/wards', async (req, res) => {
   try {
     await pool.query('INSERT INTO wards (id, name, requirements) VALUES ($1, $2, $3)', [id, name, JSON.stringify(requirements)]);
     res.status(201).json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/wards/:id', async (req, res) => {
+  await getTablesReady();
+  const { name, requirements } = req.body;
+  if (isUsingMock) {
+    const idx = mockDb.wards.findIndex(w => w.id === req.params.id);
+    if (idx > -1) mockDb.wards[idx] = { id: req.params.id, name, requirements };
+    return res.json({ success: true });
+  }
+  try {
+    await pool.query('UPDATE wards SET name = $1, requirements = $2 WHERE id = $3', [name, JSON.stringify(requirements), req.params.id]);
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -159,9 +191,9 @@ app.get('/api/debug-db', async (req, res) => {
   try {
     await ensureTables();
     const { rows } = await pool.query('SELECT NOW() as now');
-    res.json({ status: 'connected', time: rows[0].now, mode: isUsingMock ? 'mock' : 'postgres' });
+    res.json({ status: 'connected', mode: 'postgres' });
   } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message, mode: isUsingMock ? 'mock' : 'postgres' });
+    res.json({ status: 'error', message: e.message, mode: 'mock' });
   }
 });
 

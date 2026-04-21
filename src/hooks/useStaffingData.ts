@@ -225,12 +225,17 @@ export function useStaffingData() {
 
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
       try {
-          await fetch('/api/import', {
+          const resp = await fetch('/api/import', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(newData)
           });
-          await fetchData();
+          if (resp.ok) {
+            await fetchData();
+          } else {
+            const text = await resp.text();
+            alert('Import failed: ' + text);
+          }
       } catch (e) {
           console.error('Failed to import data', e);
       }
@@ -238,8 +243,10 @@ export function useStaffingData() {
 
   const clearAssignments = useCallback(async () => {
     try {
-        await fetch('/api/assignments', { method: 'DELETE' });
-        setData(prev => ({ ...prev, assignments: [] }));
+        const resp = await fetch('/api/assignments', { method: 'DELETE' });
+        if (resp.ok) {
+          setData(prev => ({ ...prev, assignments: [] }));
+        }
     } catch (e) {
         console.error('Failed to clear assignments', e);
     }
@@ -247,15 +254,20 @@ export function useStaffingData() {
 
   const updateDoctor = useCallback(async (doctor: Doctor) => {
     try {
-        await fetch(`/api/doctors/${doctor.id}`, {
+        const resp = await fetch(`/api/doctors/${doctor.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(doctor)
         });
-        setData(prev => ({
-            ...prev,
-            doctors: prev.doctors.map(d => d.id === doctor.id ? doctor : d)
-        }));
+        if (resp.ok) {
+          setData(prev => ({
+              ...prev,
+              doctors: prev.doctors.map(d => d.id === doctor.id ? doctor : d)
+          }));
+        } else {
+          const text = await resp.text();
+          alert('Update failed: ' + text);
+        }
     } catch (e) {
         console.error('Failed to update doctor', e);
     }
@@ -263,15 +275,20 @@ export function useStaffingData() {
 
   const updateWard = useCallback(async (ward: Ward) => {
     try {
-        await fetch(`/api/wards/${ward.id}`, {
+        const resp = await fetch(`/api/wards/${ward.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(ward)
         });
-        setData(prev => ({
-            ...prev,
-            wards: prev.wards.map(w => w.id === ward.id ? ward : w)
-        }));
+        if (resp.ok) {
+          setData(prev => ({
+              ...prev,
+              wards: prev.wards.map(w => w.id === ward.id ? ward : w)
+          }));
+        } else {
+          const text = await resp.text();
+          alert('Update failed: ' + text);
+        }
     } catch (e) {
         console.error('Failed to update ward', e);
     }
