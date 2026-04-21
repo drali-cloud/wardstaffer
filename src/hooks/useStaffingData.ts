@@ -329,9 +329,77 @@ export function useStaffingData() {
     } catch (e) { alert('Shift swap failed.'); } finally { setSyncing(false); }
   }, [data.shifts]);
 
+  const calculateERCalls = useCallback(async (period: string, config: { men: string[], women: string[], pediatric: string[] }) => {
+    setSyncing(true);
+    try {
+        const daysInMonth = new Date(parseInt(period.split('-')[0]), parseInt(period.split('-')[1]), 0).getDate();
+        const wardShifts = data.shifts.filter(s => s.period === period);
+        const newERShifts: ShiftRecord[] = [];
+        
+        const categories = [
+            { id: 'er-men', name: 'Men', slots: 4, wards: config.men },
+            { id: 'er-women', name: 'Women', slots: 4, wards: config.women },
+            { id: 'er-pediatric', name: 'Pediatric', slots: 3, wards: config.pediatric }
+        ];
+
+        // Track used doctors for circular queue per category
+        const catQueues: Record<string, string[]> = {};
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            categories.forEach(cat => {
+                // Pool doctors from assigned wards
+                const pool = new Set<string>();
+                cat.wards.forEach(wId => {
+                    const assignment = data.assignments.find(a => a.period === period && a.wardId === wId);
+                    assignment?.doctorIds.forEach(dId => pool.add(dId));
+                });
+                
+                const poolArray = Array.from(pool);
+                if (poolArray.length === 0) return;
+
+                if (!catQueues[cat.id] || catQueues[cat.id].length === 0) catQueues[cat.id] = [...poolArray].sort(() => Math.random() - 0.5);
+
+                for (let slot = 0; slot < cat.slots; slot++) {
+                    let assigned = false;
+                    let attempts = 0;
+                    
+                    while (!assigned && attempts < catQueues[cat.id].length) {
+                        const candidate = catQueues[cat.id][0];
+                        catQueues[cat.id].shift();
+                        
+                        // Conflict Check: 
+                        // 1. Same day ward shift
+                        const hasWardShiftToday = wardShifts.some(s => s.day === day && s.doctorId === candidate);
+                        // 2. Yesterday ward shift (rest period)
+                        const hasWardShiftYesterday = wardShifts.some(s => s.day === day - 1 && s.doctorId === candidate);
+                        // 3. Tomorrow ward shift (rest period)
+                        const hasWardShiftTomorrow = wardShifts.some(s => s.day === day + 1 && s.doctorId === candidate);
+                        // 4. Same day other ER call
+                        const hasOtherERToday = newERShifts.some(s => s.day === day && s.doctorId === candidate);
+
+                        if (!hasWardShiftToday && !hasWardShiftYesterday && !hasWardShiftTomorrow && !hasOtherERToday) {
+                            newERShifts.push({
+                                id: `er-${cat.id}-${day}-${slot}`,
+                                period, day, wardId: cat.id, doctorId: candidate, slotIndex: slot
+                            });
+                            assigned = true;
+                        }
+                        
+                        catQueues[cat.id].push(candidate); // Move to back
+                        attempts++;
+                    }
+                }
+            });
+        }
+
+        await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newERShifts) });
+        setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && s.wardId.startsWith('er-'))), ...newERShifts] }));
+    } catch (e) { alert('ER calculation failed.'); } finally { setSyncing(false); }
+  }, [data]);
+
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
   }, [executeAction]);
 
-  return { ...data, loading, syncing, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap };
+  return { ...data, loading, syncing, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap };
 }

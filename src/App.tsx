@@ -75,6 +75,7 @@ export default function App() {
           <NavItem active={currentView === 'doctors'} onClick={() => { setCurrentView('doctors'); setSidebarOpen(false); }} label="Staff Registry" icon={<Users className="w-4 h-4" />} />
           <NavItem active={currentView === 'wards'} onClick={() => { setCurrentView('wards'); setSidebarOpen(false); }} label="Ward Config" icon={<Hospital className="w-4 h-4" />} />
           <NavItem active={currentView === 'calendar'} onClick={() => { setCurrentView('calendar'); setSidebarOpen(false); }} label="Shift Calendar" icon={<Calendar className="w-4 h-4" />} />
+          <NavItem active={currentView === 'er_calls'} onClick={() => { setCurrentView('er_calls'); setSidebarOpen(false); }} label="ER On-Call" icon={<Activity className="w-4 h-4 text-amber-500" />} />
           <NavItem active={currentView === 'archive'} onClick={() => { setCurrentView('archive'); setSelectedPeriod(null); setSidebarOpen(false); }} label="Archives & Roster" icon={<Archive className="w-4 h-4" />} />
         </nav>
         <div className="p-6 border-t border-slate-800 bg-slate-950/50">
@@ -89,9 +90,9 @@ export default function App() {
         <header className="h-16 bg-white border-b border-slate-200 px-4 lg:px-8 flex items-center justify-between shadow-sm shrink-0 z-20">
           <div className="flex items-center space-x-3">
             <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 hover:bg-slate-50 rounded-lg border border-slate-200 mr-1"><ListChecks className="w-5 h-5 text-slate-600" /></button>
-            <h1 className="text-sm lg:text-lg font-semibold text-slate-800 capitalize truncate">{currentView}</h1>
+            <h1 className="text-sm lg:text-lg font-semibold text-slate-800 capitalize truncate">{currentView === 'er_calls' ? 'ER On-Call' : currentView}</h1>
             <div className="hidden sm:block h-4 w-[1px] bg-slate-200"></div>
-            <div className="hidden sm:flex items-center text-[10px] text-slate-400 uppercase font-bold tracking-wider"><span>{user.role}</span><ChevronRight className="w-3 h-3" /> <span className="text-blue-600">{currentView}</span></div>
+            <div className="hidden sm:flex items-center text-[10px] text-slate-400 uppercase font-bold tracking-wider"><span>{user.role}</span><ChevronRight className="w-3 h-3" /> <span className="text-blue-600">{currentView === 'er_calls' ? 'ER On-Call' : currentView}</span></div>
           </div>
           {staffing.syncing && (<div className="flex items-center space-x-2 bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-[10px] font-bold animate-pulse"><RefreshCw className="w-3 h-3 animate-spin" /><span>Syncing...</span></div>)}
         </header>
@@ -101,6 +102,7 @@ export default function App() {
               <motion.div key={currentView + (selectedPeriod || '')} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
                 {currentView === 'dashboard' && <DashboardView staffing={staffing} user={user} />}
                 {currentView === 'calendar' && <ShiftCalendarView staffing={staffing} />}
+                {currentView === 'er_calls' && <ERCallsView staffing={staffing} />}
                 {currentView === 'doctors' && <DoctorsView staffing={staffing} user={user} />}
                 {currentView === 'wards' && <WardsView staffing={staffing} user={user} />}
                 {currentView === 'archive' && <MonthlyArchiveView staffing={staffing} user={user} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} />}
@@ -218,6 +220,141 @@ function ShiftCalendarView({ staffing }: { staffing: any }) {
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            <div className="pt-8 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-6">
+                    <div><h2 className="text-xl font-bold text-slate-800">ER Call Center</h2><p className="text-xs text-slate-500 mt-1">Emergency dispatch by department</p></div>
+                    <div className="bg-amber-50 text-amber-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase border border-amber-100 flex items-center gap-2"><Shield className="w-3 h-3" /> Priority Access</div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <ERCategoryCard title="Men" staffing={staffing} color="blue" />
+                    <ERCategoryCard title="Women" staffing={staffing} color="pink" />
+                    <ERCategoryCard title="Pediatric" staffing={staffing} color="green" />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ERCallsView({ staffing }: { staffing: any }) {
+    const [viewDate, setViewDate] = useState(new Date());
+    const [selectedDay, setSelectedDay] = useState<number | null>(null);
+    const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[] }>({ men: [], women: [], pediatric: [] });
+    const [dragSourceWard, setDragSourceWard] = useState<string | null>(null);
+
+    const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
+    const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
+    const firstDayIdx = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
+    
+    const erShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.wardId.startsWith('er-'));
+
+    const handleDrop = (cat: 'men' | 'women' | 'pediatric') => {
+        if (!dragSourceWard) return;
+        setErConfig(prev => {
+            if (prev[cat].includes(dragSourceWard)) return prev;
+            return { ...prev, [cat]: [...prev[cat], dragSourceWard] };
+        });
+        setDragSourceWard(null);
+    };
+
+    return (
+        <div className="space-y-8 pb-20">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4"><div className="bg-amber-50 p-3 rounded-xl text-amber-600"><Activity className="w-6 h-6" /></div><div><h2 className="text-xl font-bold text-slate-800">ER On-Call Center</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Multi-Departmental Rotation Control</p></div></div>
+                <div className="flex items-center gap-2"><div className="flex gap-1 mr-4"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div><button onClick={() => staffing.calculateERCalls(period, erConfig)} className="flex items-center gap-2 text-xs font-bold uppercase bg-amber-600 text-white px-6 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-4 h-4" /> Calculate ER Calls</button></div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Hospital className="w-4 h-4 text-blue-600" /> Source Wards</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {staffing.wards.map((w: Ward) => (
+                            <div key={w.id} draggable onDragStart={() => setDragSourceWard(w.id)} className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-blue-50 transition-all">{w.name}</div>
+                        ))}
+                    </div>
+                </div>
+                {(['men', 'women', 'pediatric'] as const).map(cat => (
+                    <div key={cat} onDragOver={e => e.preventDefault()} onDrop={() => handleDrop(cat)} className="bg-white p-6 rounded-2xl border-2 border-dashed border-slate-200 hover:border-amber-400 hover:bg-amber-50/30 transition-all relative min-h-[150px]">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><Users className="w-4 h-4 text-amber-500" /> {cat} ER Pool</h3>
+                            <button onClick={() => setErConfig(prev => ({ ...prev, [cat]: [] }))} className="text-[9px] font-bold text-slate-400 hover:text-red-600 uppercase">Clear</button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {erConfig[cat].map(wId => (
+                                <div key={wId} className="px-2 py-1 bg-amber-100 border border-amber-200 rounded text-[9px] font-bold text-amber-700 uppercase">{staffing.wardMap.get(wId)?.name}</div>
+                            ))}
+                            {erConfig[cat].length === 0 && <p className="text-[10px] text-slate-400 italic">Drag wards here...</p>}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-px bg-slate-200 rounded-2xl overflow-hidden border border-slate-200 shadow-xl">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (<div key={d} className="bg-slate-50 p-3 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">{d}</div>))}
+                {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`e-${i}`} className="bg-slate-50/50 min-h-[90px]" />)}
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                    const day = i + 1;
+                    const dayShifts = erShifts.filter((s: ShiftRecord) => s.day === day);
+                    return (
+                        <div key={day} onClick={() => setSelectedDay(day)} className="bg-white p-2 min-h-[90px] cursor-pointer hover:bg-amber-50 transition-all border-b border-r border-slate-100 group relative">
+                            <span className="text-xs font-bold text-slate-400">{day}</span>
+                            {dayShifts.length > 0 && (
+                                <div className="mt-2 space-y-1">
+                                    <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase">{dayShifts.length} Active Slots</span></div>
+                                    <div className="flex gap-0.5">{dayShifts.map(s => <div key={s.id} className={`w-1 h-2 rounded-full ${s.wardId === 'er-pediatric' ? 'bg-green-400' : s.wardId === 'er-women' ? 'bg-pink-400' : 'bg-blue-400'}`} />)}</div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+
+            <AnimatePresence>
+                {selectedDay && (
+                    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/60 backdrop-blur-sm">
+                        <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+                            <div className="bg-slate-900 p-6 flex justify-between items-center text-white">
+                                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center font-bold text-lg">{selectedDay}</div><div><h3 className="text-lg font-bold">ER Operational Report</h3><p className="text-xs text-slate-400">{new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(viewDate.getFullYear(), viewDate.getMonth(), selectedDay))}</p></div></div>
+                                <button onClick={() => setSelectedDay(null)} className="p-2 hover:bg-white/10 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
+                            </div>
+                            <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 max-h-[60vh] overflow-y-auto">
+                                <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} />
+                                <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} />
+                                <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00']} />
+                            </div>
+                            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end"><button onClick={() => setSelectedDay(null)} className="bg-blue-600 text-white px-8 py-2.5 rounded-xl font-bold shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all">Dismiss Report</button></div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+function ERModalColumn({ title, wardId, day, period, staffing, color, slots }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green', slots: string[] }) {
+    const dayShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.day === day && s.wardId === wardId);
+    const colors: any = { blue: 'text-blue-600 bg-blue-50 border-blue-100', pink: 'text-pink-600 bg-pink-50 border-pink-100', green: 'text-green-600 bg-green-50 border-green-100' };
+    return (
+        <div className="space-y-4">
+            <h4 className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full w-fit ${colors[color]}`}>{title} Department</h4>
+            <div className="space-y-2">
+                {slots.map((time, idx) => {
+                    const shift = dayShifts.find(s => s.slotIndex === idx);
+                    return (
+                        <div key={idx} className="p-3 bg-white rounded-xl border border-slate-100 shadow-sm group hover:border-blue-200 transition-all">
+                            <p className="text-[8px] font-bold text-slate-400 uppercase mb-1">{time}</p>
+                            {shift ? (
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold text-slate-800 truncate">{staffing.doctorMap.get(shift.doctorId)?.name}</span>
+                                    <button className="text-slate-300 hover:text-red-600 p-1"><Edit2 className="w-3 h-3" /></button>
+                                </div>
+                            ) : (
+                                <span className="text-[9px] text-slate-300 italic">No duty assigned</span>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 }
@@ -268,16 +405,21 @@ function ProfileView({ staffing, user }: { staffing: any, user: AuthUser }) {
                             {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`e-${i}`} className="bg-white" />)}
                             {Array.from({ length: daysInMonth }).map((_, i) => {
                                 const d = i + 1;
-                                const shift = myShifts.find((s: ShiftRecord) => s.day === d);
+                                const shifts = myShifts.filter((s: ShiftRecord) => s.day === d);
                                 return (
-                                    <div key={d} className={`min-h-[60px] p-1 border-t border-l border-slate-50 relative ${shift ? 'bg-blue-50/50' : 'bg-white'}`}>
-                                        <span className={`text-[9px] font-bold ${shift ? 'text-blue-600' : 'text-slate-400'}`}>{d}</span>
-                                        {shift && (
-                                            <div className="mt-1 p-1 bg-blue-600 rounded text-[7px] text-white font-bold uppercase leading-tight">
-                                                <p className="truncate">{staffing.wardMap.get(shift.wardId)?.name}</p>
-                                                <p className="opacity-80">Slot {shift.slotIndex + 1}</p>
-                                            </div>
-                                        )}
+                                    <div key={d} className={`min-h-[70px] p-1 border-t border-l border-slate-50 relative ${shifts.length > 0 ? 'bg-slate-50/50' : 'bg-white'}`}>
+                                        <span className={`text-[9px] font-bold ${shifts.length > 0 ? 'text-blue-600' : 'text-slate-400'}`}>{d}</span>
+                                        <div className="mt-1 space-y-1">
+                                            {shifts.map(shift => {
+                                                const isER = shift.wardId.startsWith('er-');
+                                                return (
+                                                    <div key={shift.id} className={`p-1 rounded text-[7px] font-bold uppercase leading-tight ${isER ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-blue-600 text-white'}`}>
+                                                        <p className="truncate">{isER ? 'ER Call' : staffing.wardMap.get(shift.wardId)?.name}</p>
+                                                        <p className="opacity-80">{isER ? (shift.wardId.split('-')[1]) : `Slot ${shift.slotIndex + 1}`}</p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 );
                             })}
