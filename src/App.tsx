@@ -72,12 +72,24 @@ export default function App() {
 
         if (docWs) {
             const docData = XLSX.utils.sheet_to_json(docWs) as any[];
-            const importedDoctors: Doctor[] = docData.map(d => ({
-                id: Math.random().toString(36).substr(2, 9),
-                name: d.name || d.Name || "Unnamed Doctor",
-                gender: (d.gender || d.Gender || "Other") as Gender,
-                previousWards: (d.pw || d.PreviousWards) ? (d.pw || d.PreviousWards).toString().split(',').map((s: string) => s.trim()) : []
-            }));
+            const importedDoctors: Doctor[] = docData.map(d => {
+                // Find column values by looking for various keys (case-insensitive)
+                const findKey = (patterns: string[]) => {
+                    const key = Object.keys(d).find(k => patterns.some(p => k.toLowerCase().includes(p.toLowerCase())));
+                    return key ? d[key] : null;
+                };
+
+                const name = findKey(['doctor name', 'name', 'official title']) || "Unnamed Doctor";
+                const gender = findKey(['gender of the doctor', 'gender']) || "Other";
+                const pw = findKey(['previous wards', 'pw', 'experience']) || "";
+
+                return {
+                    id: Math.random().toString(36).substr(2, 9),
+                    name: name.toString(),
+                    gender: gender.toString() as Gender,
+                    previousWards: pw ? pw.toString().split(',').map((s: string) => s.trim()).filter(Boolean) : []
+                };
+            });
             staffing.importData({ doctors: importedDoctors });
         }
     };
