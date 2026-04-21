@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks
+  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
 import { Doctor, Ward, Gender, Assignment, ShiftRecord } from './types';
 import * as XLSX from 'xlsx';
 
-type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile';
+type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar';
 type Role = 'resident' | 'admin';
 
 interface AuthUser {
@@ -31,12 +31,13 @@ export default function App() {
   }, [user]);
 
   const handleLogin = React.useCallback((name: string, pass: string) => {
-      if (name === 'root' && pass === 'root') {
+      const cleanName = name.trim().toLowerCase();
+      if (cleanName === 'root' && pass === 'root') {
           setUser({ id: 'root', name: 'System Root', role: 'admin' });
           return true;
       }
-      const doc = staffing.doctors.find(d => d.name === name);
-      if (doc && (doc.password || '11111111') === pass) {
+      const doc = staffing.doctors.find(d => d.name.trim().toLowerCase() === cleanName);
+      if (doc && (doc.password || '11111111') === pass.trim()) {
           setUser({ id: doc.id, name: doc.name, role: 'resident' });
           return true;
       }
@@ -81,17 +82,16 @@ export default function App() {
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <NavItem active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} label="Overview" icon={<ClipboardList className="w-4 h-4" />} />
+          <NavItem active={currentView === 'calendar'} onClick={() => setCurrentView('calendar')} label="Shift Calendar" icon={<Calendar className="w-4 h-4" />} />
           <NavItem active={currentView === 'profile'} onClick={() => setCurrentView('profile')} label="My Profile" icon={<User className="w-4 h-4" />} />
           <div className="h-px bg-slate-800 my-4"></div>
           <NavItem active={currentView === 'doctors'} onClick={() => setCurrentView('doctors')} label="Staff Registry" icon={<Users className="w-4 h-4" />} />
           <NavItem active={currentView === 'wards'} onClick={() => setCurrentView('wards')} label="Ward Config" icon={<Hospital className="w-4 h-4" />} />
           <NavItem active={currentView === 'archive'} onClick={() => { setCurrentView('archive'); setSelectedPeriod(null); }} label="Archives & Roster" icon={<Archive className="w-4 h-4" />} />
-          <NavItem active={currentView === 'assignments'} onClick={() => setCurrentView('assignments')} label="History Logs" icon={<Calendar className="w-4 h-4" />} />
         </nav>
         <div className="p-6 border-t border-slate-800 bg-slate-950/50">
           <div className="space-y-4">
               <div className="flex items-center space-x-3 mb-2"><div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-300">{user.name.charAt(0)}</div><div className="overflow-hidden"><p className="text-xs font-bold text-white truncate">{user.name}</p><p className="text-[10px] text-slate-500 uppercase tracking-widest">{user.role}</p></div></div>
-              {user.role === 'admin' && (<div className="space-y-2 border-t border-slate-800 pt-3"><button onClick={handleExport} className="w-full flex items-center space-x-3 text-xs text-slate-400 hover:text-white transition-colors"><Download className="w-3 h-3" /> <span>Export Full Dispatch</span></button></div>)}
               <button onClick={handleLogout} className="w-full flex items-center space-x-3 text-xs text-red-400 hover:text-red-300 transition-colors pt-2 border-t border-slate-800"><LogOut className="w-3 h-3" /> <span>Sign Out</span></button>
           </div>
         </div>
@@ -104,6 +104,7 @@ export default function App() {
         </header>
         <div className="flex-1 overflow-y-auto p-8 bg-slate-50"><div className="max-w-7xl mx-auto"><AnimatePresence mode="wait"><motion.div key={currentView + selectedPeriod} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
           {currentView === 'dashboard' && <DashboardView staffing={staffing} user={user} />}
+          {currentView === 'calendar' && <ShiftCalendarView staffing={staffing} />}
           {currentView === 'doctors' && <DoctorsView staffing={staffing} user={user} />}
           {currentView === 'wards' && <WardsView staffing={staffing} user={user} />}
           {currentView === 'archive' && <MonthlyArchiveView staffing={staffing} user={user} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} />}
@@ -115,6 +116,78 @@ export default function App() {
   );
 }
 
+function ShiftCalendarView({ staffing }: { staffing: any }) {
+    const [viewDate, setViewDate] = useState(new Date());
+    const [selectedDay, setSelectedDay] = useState<number | null>(null);
+    const period = viewDate.toISOString().slice(0, 7);
+    const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
+    const firstDayIdx = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
+    const periodShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period);
+
+    const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
+    const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
+
+    return (
+        <div className="space-y-8">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div className="flex items-center gap-4"><div className="bg-blue-50 p-3 rounded-xl text-blue-600"><Calendar className="w-6 h-6" /></div><div><h2 className="text-xl font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(viewDate)}</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Shift Operations Center</p></div></div>
+                <div className="flex gap-2"><button onClick={prevMonth} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={nextMonth} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div>
+            </div>
+            
+            <div className="grid grid-cols-7 gap-px bg-slate-200 rounded-2xl overflow-hidden border border-slate-200 shadow-xl">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (<div key={d} className="bg-slate-50 p-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">{d}</div>))}
+                {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`empty-${i}`} className="bg-slate-50/50 min-h-[120px]" />)}
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                    const day = i + 1;
+                    const dayShiftsCount = periodShifts.filter((s: ShiftRecord) => s.day === day).length;
+                    return (
+                        <div key={day} onClick={() => setSelectedDay(day)} className={`bg-white p-4 min-h-[140px] cursor-pointer hover:bg-blue-50 transition-all border-b border-r border-slate-100 group relative ${selectedDay === day ? 'ring-2 ring-blue-500 z-10' : ''}`}>
+                            <span className={`text-sm font-bold ${day === new Date().getDate() && viewDate.getMonth() === new Date().getMonth() ? 'w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center' : 'text-slate-700'}`}>{day}</span>
+                            {dayShiftsCount > 0 && (<div className="mt-4 space-y-1"><div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /><span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">{dayShiftsCount} Slots Covered</span></div><div className="flex flex-wrap gap-1 mt-2">{periodShifts.filter((s: ShiftRecord) => s.day === day).slice(0, 3).map((s: ShiftRecord) => (<div key={s.id} className="w-1 h-4 bg-blue-100 rounded-full" />))}</div></div>)}
+                        </div>
+                    );
+                })}
+            </div>
+
+            <AnimatePresence>
+                {selectedDay && (
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/60 backdrop-blur-sm">
+                        <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+                            <div className="bg-slate-900 p-6 flex justify-between items-center text-white">
+                                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center font-bold text-lg">{selectedDay}</div><div><h3 className="text-lg font-bold">Daily Station Report</h3><p className="text-xs text-slate-400">{new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(viewDate.getFullYear(), viewDate.getMonth(), selectedDay))}</p></div></div>
+                                <button onClick={() => setSelectedDay(null)} className="p-2 hover:bg-white/10 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
+                            </div>
+                            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+                                {staffing.wards.map((w: Ward) => {
+                                    const dayShifts = periodShifts.filter((s: ShiftRecord) => s.day === selectedDay && s.wardId === w.id);
+                                    return (
+                                        <div key={w.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group hover:border-blue-200 transition-all">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-slate-200 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm"><Hospital className="w-5 h-5" /></div>
+                                                <div><p className="text-sm font-bold text-slate-800">{w.name}</p><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">{w.requirements.shiftDuration} Pattern</p></div>
+                                            </div>
+                                            <div className="flex -space-x-2">
+                                                {dayShifts.map((s: ShiftRecord) => (
+                                                    <div key={s.id} className="group/avatar relative">
+                                                        <div className="w-10 h-10 rounded-full border-2 border-white bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 cursor-help ring-1 ring-slate-100">{staffing.doctorMap.get(s.doctorId)?.name.charAt(0)}</div>
+                                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-[9px] rounded opacity-0 group-hover/avatar:opacity-100 pointer-events-none transition-all whitespace-nowrap z-50 font-bold uppercase">{staffing.doctorMap.get(s.doctorId)?.name}</div>
+                                                    </div>
+                                                ))}
+                                                {dayShifts.length === 0 && <span className="text-[10px] text-slate-300 font-bold uppercase italic">Unassigned</span>}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end"><button onClick={() => setSelectedDay(null)} className="btn-primary px-8">Close Report</button></div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
 function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => boolean, isLoading: boolean }) {
     const [name, setName] = useState(''); const [pass, setPass] = useState(''); const [error, setError] = useState(false);
     return (
@@ -122,8 +195,8 @@ function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => 
             <div className="max-w-md w-full bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl p-8 space-y-8">
                 <div className="text-center"><div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg"><Hospital className="w-8 h-8 text-white" /></div><h1 className="text-2xl font-bold text-white">WardStaffer Portal</h1><p className="text-slate-500 text-sm mt-2">Monthly Clinical Dispatch</p></div>
                 <form onSubmit={e => { e.preventDefault(); if (onLogin(name, pass)) setError(false); else setError(true); }} className="space-y-6">
-                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Staff Name</label><div className="relative group"><User className="absolute left-4 top-3.5 w-4 h-4 text-slate-400 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="text" placeholder="Full Registered Name" className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-3.5 pl-12 pr-4 text-sm focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm" value={name} onChange={e => setName(e.target.value)} disabled={isLoading} /></div></div>
-                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Security Access Key</label><div className="relative group"><Lock className="absolute left-4 top-3.5 w-4 h-4 text-slate-400 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="password" placeholder="Key" className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-3.5 pl-12 pr-4 text-sm focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm" value={pass} onChange={e => setPass(e.target.value)} disabled={isLoading} /></div></div>
+                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Staff Name</label><div className="relative flex items-center group"><User className="absolute left-5 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="text" placeholder="Full Registered Name" className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-4.5 pl-16 pr-4 text-sm focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium" value={name} onChange={e => setName(e.target.value)} disabled={isLoading} /></div></div>
+                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Security Access Key</label><div className="relative flex items-center group"><Lock className="absolute left-5 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="password" placeholder="••••••••" className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-4.5 pl-16 pr-4 text-sm focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium" value={pass} onChange={e => setPass(e.target.value)} disabled={isLoading} /></div></div>
                     <button type="submit" disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:bg-slate-700 flex items-center justify-center gap-2">{isLoading ? (<><RefreshCw className="w-4 h-4 animate-spin" /> Syncing...</>) : ("Authenticate & Access")}</button>
                 </form>
             </div>
@@ -181,7 +254,6 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staf
     if (selectedPeriod) {
         const periodAssignments = staffing.assignments.filter((a: Assignment) => a.period === selectedPeriod);
         const periodShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === selectedPeriod);
-
         const handleExportDispatch = () => {
             const gridRows: any[] = [];
             let maxDocs = 0; const wardToDocs: Record<string, string[]> = {};
@@ -199,7 +271,6 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staf
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(gridRows), "Monthly Dispatch");
             XLSX.writeFile(wb, `Dispatch_${selectedPeriod}.xlsx`);
         };
-
         const handleExportRoster = () => {
             if (periodShifts.length === 0) { alert('Generate roster first.'); return; }
             const wb = XLSX.utils.book_new();
@@ -208,7 +279,7 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staf
             days.forEach(day => {
                 const dayShifts = periodShifts.filter(s => s.day === day);
                 staffing.wards.forEach(w => {
-                    const wardShifts = dayShifts.filter(s => s.wardId === w.id);
+                    const wardShifts = dayShifts.filter(s => s.day === day && s.wardId === w.id);
                     if (wardShifts.length > 0) {
                         grid.push({ 
                             Date: `${selectedPeriod}-${day}`, 
@@ -222,45 +293,14 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staf
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grid), "Daily Roster");
             XLSX.writeFile(wb, `Daily_Roster_${selectedPeriod}.xlsx`);
         };
-
         return (
             <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                        <button onClick={() => onSelect(null)} className="flex items-center text-xs font-bold text-blue-600 uppercase tracking-widest"><ChevronLeft className="w-4 h-4" /> Archive</button>
-                        <div className="h-4 w-[1px] bg-slate-200"></div>
-                        <div className="flex bg-slate-100 p-1 rounded-lg">
-                            <button onClick={() => setViewMode('dispatch')} className={`px-4 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewMode === 'dispatch' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>Dispatch Pool</button>
-                            <button onClick={() => setViewMode('roster')} className={`px-4 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewMode === 'roster' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>Daily Roster</button>
-                        </div>
-                    </div>
-                    <div className="flex gap-2">
-                        {user.role === 'admin' && viewMode === 'roster' && (
-                            <button onClick={() => staffing.calculateDailyRoster(selectedPeriod)} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20"><RefreshCw className="w-3.5 h-3.5" /> Calculate Shifts</button>
-                        )}
-                        <button onClick={handleExportDispatch} className="flex items-center gap-2 text-[10px] font-bold uppercase border border-blue-200 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 transition-colors">
-                            <Download className="w-3.5 h-3.5" /> Export Dispatch
-                        </button>
-                        <button onClick={handleExportRoster} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-50 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-100 transition-colors">
-                            <ListChecks className="w-3.5 h-3.5" /> Export Roster
-                        </button>
-                    </div>
-                </div>
-                <div className="technical-card overflow-hidden">
-                    {viewMode === 'dispatch' ? (
-                        <table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">Ward Unit</th><th className="col-header">Monthly Personnel Pool</th></tr></thead><tbody className="text-sm divide-y divide-slate-100">{periodAssignments.map((a: Assignment) => (<tr key={a.id}><td className="px-6 py-4 font-semibold text-slate-800">{staffing.wardMap.get(a.wardId)?.name}</td><td className="px-6 py-4"><div className="flex flex-wrap gap-1">{a.doctorIds.map(id => (<span key={id} className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[9px] font-bold uppercase">{staffing.doctorMap.get(id)?.name}</span>))}</div></td></tr>))}</tbody></table>
-                    ) : (
-                        <div className="p-0">
-                            {periodShifts.length === 0 ? (<div className="p-20 text-center space-y-4"><Calendar className="w-12 h-12 text-slate-200 mx-auto" /><p className="text-slate-400 text-sm">No roster generated yet. Click <b>Calculate Shifts</b>.</p></div>) : (
-                                <div className="max-h-[600px] overflow-auto"><table className="technical-grid border-separate border-spacing-0"><thead><tr className="bg-slate-50 sticky top-0 z-10 shadow-sm"><th className="col-header bg-slate-50">Day</th>{staffing.wards.map(w => (<th key={w.id} className="col-header bg-slate-50 border-l border-slate-100">{w.name}</th>))}</tr></thead><tbody className="text-xs divide-y divide-slate-100">{[...new Set(periodShifts.map(s => s.day))].sort((a,b)=>a-b).map(day => (<tr key={day} className="hover:bg-slate-50/50"><td className="px-4 py-3 font-bold text-blue-600 border-r border-slate-100 sticky left-0 bg-white z-20">Day {day}</td>{staffing.wards.map(w => { const shifts = periodShifts.filter(s => s.day === day && s.wardId === w.id); return (<td key={w.id} className="px-4 py-3 border-l border-slate-50"><div className="space-y-2">{shifts.map(s => (<div key={s.id} className="flex flex-col border-b border-slate-50 pb-1 last:border-0"><span className="text-[10px] font-bold text-slate-800">{staffing.doctorMap.get(s.doctorId)?.name}</span><span className="text-[8px] text-slate-400 uppercase font-bold">Slot {s.slotIndex + 1} ({w.requirements.shiftDuration})</span></div>))}</div></td>); })}</tr>))}</tbody></table></div>
-                            )}
-                        </div>
-                    )}
-                </div>
+                <div className="flex justify-between items-center"><div className="flex items-center gap-4"><button onClick={() => onSelect(null)} className="flex items-center text-xs font-bold text-blue-600 uppercase tracking-widest"><ChevronLeft className="w-4 h-4" /> Archive</button><div className="h-4 w-[1px] bg-slate-200"></div><div className="flex bg-slate-100 p-1 rounded-lg"><button onClick={() => setViewMode('dispatch')} className={`px-4 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewMode === 'dispatch' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>Dispatch Pool</button><button onClick={() => setViewMode('roster')} className={`px-4 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewMode === 'roster' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>Daily Roster</button></div></div><div className="flex gap-2">{user.role === 'admin' && viewMode === 'roster' && (<button onClick={() => staffing.calculateDailyRoster(selectedPeriod)} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20"><RefreshCw className="w-3.5 h-3.5" /> Calculate Shifts</button>)}<button onClick={handleExportDispatch} className="flex items-center gap-2 text-[10px] font-bold uppercase border border-blue-200 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 transition-colors"><Download className="w-3.5 h-3.5" /> Export Dispatch</button><button onClick={handleExportRoster} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-50 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-100 transition-colors"><ListChecks className="w-3.5 h-3.5" /> Export Roster</button></div></div>
+                <div className="technical-card overflow-hidden">{viewMode === 'dispatch' ? (<table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">Ward Unit</th><th className="col-header">Monthly Personnel Pool</th></tr></thead><tbody className="text-sm divide-y divide-slate-100">{periodAssignments.map((a: Assignment) => (<tr key={a.id}><td className="px-6 py-4 font-semibold text-slate-800">{staffing.wardMap.get(a.wardId)?.name}</td><td className="px-6 py-4"><div className="flex flex-wrap gap-1">{a.doctorIds.map(id => (<span key={id} className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[9px] font-bold uppercase">{staffing.doctorMap.get(id)?.name}</span>))}</div></td></tr>))}</tbody></table>) : (<div className="p-0">{periodShifts.length === 0 ? (<div className="p-20 text-center space-y-4"><Calendar className="w-12 h-12 text-slate-200 mx-auto" /><p className="text-slate-400 text-sm">No roster generated yet. Click <b>Calculate Shifts</b>.</p></div>) : (<div className="max-h-[600px] overflow-auto"><table className="technical-grid border-separate border-spacing-0"><thead><tr className="bg-slate-50 sticky top-0 z-10 shadow-sm"><th className="col-header bg-slate-50">Day</th>{staffing.wards.map(w => (<th key={w.id} className="col-header bg-slate-50 border-l border-slate-100">{w.name}</th>))}</tr></thead><tbody className="text-xs divide-y divide-slate-100">{[...new Set(periodShifts.map(s => s.day))].sort((a,b)=>a-b).map(day => (<tr key={day} className="hover:bg-slate-50/50"><td className="px-4 py-3 font-bold text-blue-600 border-r border-slate-100 sticky left-0 bg-white z-20">Day {day}</td>{staffing.wards.map(w => { const shifts = periodShifts.filter(s => s.day === day && s.wardId === w.id); return (<td key={w.id} className="px-4 py-3 border-l border-slate-50"><div className="space-y-2">{shifts.map(s => (<div key={s.id} className="flex flex-col border-b border-slate-50 pb-1 last:border-0"><span className="text-[10px] font-bold text-slate-800">{staffing.doctorMap.get(s.doctorId)?.name}</span><span className="text-[8px] text-slate-400 uppercase font-bold">Slot {s.slotIndex + 1} ({w.requirements.shiftDuration})</span></div>))}</div></td>); })}</tr>))}</tbody></table></div>)}</div>)}</div>
             </div>
         );
     }
-    return (<div className="space-y-6"><div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center"><div><h2 className="text-xl font-bold text-slate-800">Rotation Archives</h2><p className="text-xs text-slate-500 mt-1">Manage monthly dispatches and daily shift rosters.</p></div></div><div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">{periods.map(p => (<div key={p} onClick={() => onSelect(p)} className="technical-card p-6 cursor-pointer hover:border-blue-300 transition-all group"><div className="bg-blue-50 p-2 rounded-lg text-blue-600 w-fit mb-4 group-hover:bg-blue-600 group-hover:text-white transition-colors"><Archive className="w-5 h-5" /></div><h3 className="text-lg font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(p + '-01'))}</h3><div className="mt-4 pt-4 border-t border-slate-100 flex items-center text-[10px] font-bold text-blue-600 uppercase tracking-widest"><span>Access Roster</span><ChevronRight className="w-3 h-3" /></div></div>))}</div></div>);
+    return (<div className="space-y-6"><div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center"><div><h2 className="text-xl font-bold text-slate-800">Rotation Archives</h2><p className="text-xs text-slate-500 mt-1">Manage monthly dispatches and daily shift rosters.</p></div></div><div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">{periods.map(p => (<div key={p} className="technical-card p-6 cursor-pointer hover:border-blue-300 transition-all group relative"><div onClick={() => onSelect(p)}><div className="bg-blue-50 p-2 rounded-lg text-blue-600 w-fit mb-4 group-hover:bg-blue-600 group-hover:text-white transition-colors"><Archive className="w-5 h-5" /></div><h3 className="text-lg font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(p + '-01'))}</h3><div className="mt-4 pt-4 border-t border-slate-100 flex items-center text-[10px] font-bold text-blue-600 uppercase tracking-widest"><span>Access Roster</span><ChevronRight className="w-3 h-3" /></div></div>{user.role === 'admin' && (<button onClick={(e) => { e.stopPropagation(); if(confirm(`Purge all records for ${p}?`)) staffing.deleteDispatchByPeriod(p); }} className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="w-4 h-4" /></button>)}</div>))}</div></div>);
 };
 
 const AssignmentsView = React.memo(({ staffing }: { staffing: any }) => {

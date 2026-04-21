@@ -80,11 +80,24 @@ export function useStaffingData() {
       for (const ward of shuffledWards) {
         const { totalDoctors } = ward.requirements;
         const wardAssignments: string[] = [];
-        const eligibleDoctors = doctors.filter(d => !d.previousWards.includes(ward.id) && !assignedDoctorIds.has(d.id));
-        const pool = [...eligibleDoctors].sort(() => Math.random() - 0.5);
+        
+        // Priority 1: Doctors who have NOT worked in this ward before
+        let eligibleDoctors = doctors.filter(d => !d.previousWards.includes(ward.id) && !assignedDoctorIds.has(d.id));
+        let pool = [...eligibleDoctors].sort(() => Math.random() - 0.5);
+
         while (wardAssignments.length < totalDoctors && pool.length > 0) {
             const d = pool.pop()!; wardAssignments.push(d.id); assignedDoctorIds.add(d.id);
         }
+
+        // Priority 2: Fallback to any available doctor if still needed
+        if (wardAssignments.length < totalDoctors) {
+            let fallbackDoctors = doctors.filter(d => !assignedDoctorIds.has(d.id));
+            let fallbackPool = [...fallbackDoctors].sort(() => Math.random() - 0.5);
+            while (wardAssignments.length < totalDoctors && fallbackPool.length > 0) {
+                const d = fallbackPool.pop()!; wardAssignments.push(d.id); assignedDoctorIds.add(d.id);
+            }
+        }
+
         if (wardAssignments.length > 0) {
           newAssignments.push({ id: `${period}-${ward.id}`, period, wardId: ward.id, doctorIds: wardAssignments });
         }

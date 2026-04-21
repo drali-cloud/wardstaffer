@@ -4,6 +4,7 @@ export interface Doctor {
   id: string;
   name: string;
   gender: Gender;
+  password?: string;
   previousWards: string[]; // List of ward IDs the doctor has worked in
 }
 
