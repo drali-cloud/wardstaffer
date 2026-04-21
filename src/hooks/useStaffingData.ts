@@ -71,28 +71,33 @@ export function useStaffingData() {
   }, [executeAction]);
 
   const generateMonthlyDispatch = useCallback(async (period: string) => {
+    if (data.doctors.length === 0 || data.wards.length === 0) {
+        alert('Missing staff or wards. Please configure registry first.');
+        return [];
+    }
     setSyncing(true);
     try {
       const { doctors, wards } = data;
       const newAssignments: Assignment[] = [];
       const assignedDoctorIds = new Set<string>();
       const shuffledWards = [...wards].sort(() => Math.random() - 0.5);
+
       for (const ward of shuffledWards) {
         const { totalDoctors } = ward.requirements;
         const wardAssignments: string[] = [];
         
-        // Priority 1: Doctors who have NOT worked in this ward before
-        let eligibleDoctors = doctors.filter(d => !d.previousWards.includes(ward.id) && !assignedDoctorIds.has(d.id));
-        let pool = [...eligibleDoctors].sort(() => Math.random() - 0.5);
+        // Phase 1: Try to find doctors who haven't worked here before
+        let primaryPool = doctors.filter(d => !d.previousWards.includes(ward.id) && !assignedDoctorIds.has(d.id));
+        primaryPool.sort(() => Math.random() - 0.5);
 
-        while (wardAssignments.length < totalDoctors && pool.length > 0) {
-            const d = pool.pop()!; wardAssignments.push(d.id); assignedDoctorIds.add(d.id);
+        while (wardAssignments.length < totalDoctors && primaryPool.length > 0) {
+            const d = primaryPool.pop()!; wardAssignments.push(d.id); assignedDoctorIds.add(d.id);
         }
 
-        // Priority 2: Fallback to any available doctor if still needed
+        // Phase 2: If still need doctors, take any available staff who isn't already working this month
         if (wardAssignments.length < totalDoctors) {
-            let fallbackDoctors = doctors.filter(d => !assignedDoctorIds.has(d.id));
-            let fallbackPool = [...fallbackDoctors].sort(() => Math.random() - 0.5);
+            let fallbackPool = doctors.filter(d => !assignedDoctorIds.has(d.id));
+            fallbackPool.sort(() => Math.random() - 0.5);
             while (wardAssignments.length < totalDoctors && fallbackPool.length > 0) {
                 const d = fallbackPool.pop()!; wardAssignments.push(d.id); assignedDoctorIds.add(d.id);
             }
@@ -102,19 +107,31 @@ export function useStaffingData() {
           newAssignments.push({ id: `${period}-${ward.id}`, period, wardId: ward.id, doctorIds: wardAssignments });
         }
       }
-      if (newAssignments.length === 0) { alert('No eligible staff.'); return []; }
+
+      if (newAssignments.length === 0) { throw new Error('Could not generate any assignments'); }
+
       const resp = await fetch('/api/assignments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAssignments) });
       if (!resp.ok) throw new Error('Save failed');
+
+      // Update doctor histories locally and sync
       const updatedDoctors = doctors.map(doc => {
         const assignment = newAssignments.find(a => a.doctorIds.includes(doc.id));
-        if (assignment && !doc.previousWards.includes(assignment.wardId)) return { ...doc, previousWards: [...doc.previousWards, assignment.wardId] };
+        if (assignment && !doc.previousWards.includes(assignment.wardId)) {
+            return { ...doc, previousWards: [...doc.previousWards, assignment.wardId] };
+        }
         return doc;
       });
-      const docsToUpdate = updatedDoctors.filter(d => newAssignments.some(a => a.doctorIds.includes(d.id)));
-      await fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doctors: docsToUpdate }) });
+
+      const docsToSync = updatedDoctors.filter(d => newAssignments.some(a => a.doctorIds.includes(d.id)));
+      await fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doctors: docsToSync }) });
+      
       setData(prev => ({ ...prev, doctors: updatedDoctors, assignments: [...prev.assignments, ...newAssignments] }));
       return newAssignments;
-    } catch (e) { alert('Generation failed.'); return []; } finally { setSyncing(false); }
+    } catch (e) { 
+        console.error('Dispatch error:', e);
+        alert('Generation failed. Ensure all units and staff are correctly configured.');
+        return []; 
+    } finally { setSyncing(false); }
   }, [data]);
 
   const calculateDailyRoster = useCallback(async (period: string) => {
