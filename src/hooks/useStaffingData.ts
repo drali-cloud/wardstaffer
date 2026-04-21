@@ -110,10 +110,7 @@ export function useStaffingData() {
 
       if (newAssignments.length === 0) { throw new Error('Could not generate any assignments'); }
 
-      const resp = await fetch('/api/assignments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAssignments) });
-      if (!resp.ok) throw new Error('Save failed');
-
-      // Update doctor histories locally and sync
+      // Sync both assignments and updated doctors in one call
       const updatedDoctors = doctors.map(doc => {
         const assignment = newAssignments.find(a => a.doctorIds.includes(doc.id));
         if (assignment && !doc.previousWards.includes(assignment.wardId)) {
@@ -121,15 +118,24 @@ export function useStaffingData() {
         }
         return doc;
       });
-
       const docsToSync = updatedDoctors.filter(d => newAssignments.some(a => a.doctorIds.includes(d.id)));
-      await fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doctors: docsToSync }) });
+
+      const resp = await fetch('/api/dispatch', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ assignments: newAssignments, doctors: docsToSync }) 
+      });
       
+      if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          throw new Error(errData.error || 'Server rejected the dispatch save');
+      }
+
       setData(prev => ({ ...prev, doctors: updatedDoctors, assignments: [...prev.assignments, ...newAssignments] }));
       return newAssignments;
-    } catch (e) { 
+    } catch (e: any) { 
         console.error('Dispatch error:', e);
-        alert('Generation failed. Ensure all units and staff are correctly configured.');
+        alert(`Generation failed: ${e.message || 'Check connection'}`);
         return []; 
     } finally { setSyncing(false); }
   }, [data]);

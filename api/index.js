@@ -224,21 +224,27 @@ app.get('/api/assignments', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/assignments', async (req, res) => {
+app.post('/api/dispatch', async (req, res) => {
   await getTablesReady();
-  const assignments = Array.isArray(req.body) ? req.body : [req.body];
+  const { assignments, doctors } = req.body;
   if (isUsingMock) {
-    for (const a of assignments) {
-      const idx = mockDb.assignments.findIndex(exist => exist.id === a.id);
-      if (idx > -1) mockDb.assignments[idx] = a;
-      else mockDb.assignments.push(a);
-    }
-    return res.json({ success: true });
+      if (assignments) mockDb.assignments.push(...assignments);
+      if (doctors) {
+          for (const d of doctors) {
+              const idx = mockDb.doctors.findIndex(exist => exist.id === d.id);
+              if (idx > -1) mockDb.doctors[idx] = d;
+          }
+      }
+      return res.json({ success: true });
   }
   try {
-    // Process all assignments in parallel
-    await Promise.all(assignments.map(a => upsertAssignment(a)));
-    res.status(201).json({ success: true });
+    const sql = getSql();
+    // Use a transaction or parallel execution for reliability
+    await Promise.all([
+        ...assignments.map(a => upsertAssignment(a)),
+        ...(doctors || []).map(d => upsertDoctor(d))
+    ]);
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
