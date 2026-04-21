@@ -83,24 +83,43 @@ export function useStaffingData() {
       const shuffledWards = [...wards].sort(() => Math.random() - 0.5);
 
       for (const ward of shuffledWards) {
-        const { totalDoctors } = ward.requirements;
+        const { totalDoctors, genderDiversity, requiredMale = 0, requiredFemale = 0 } = ward.requirements;
         const wardAssignments: string[] = [];
         
-        // Phase 1: Try to find doctors who haven't worked here before
-        let primaryPool = doctors.filter(d => !d.previousWards.includes(ward.id) && !assignedDoctorIds.has(d.id));
-        primaryPool.sort(() => Math.random() - 0.5);
+        const getEligible = (gender?: Gender) => doctors.filter(d => 
+            !assignedDoctorIds.has(d.id) && 
+            (!gender || d.gender === gender)
+        );
 
-        while (wardAssignments.length < totalDoctors && primaryPool.length > 0) {
-            const d = primaryPool.pop()!; wardAssignments.push(d.id); assignedDoctorIds.add(d.id);
+        const pickFromPool = (pool: Doctor[], count: number) => {
+            const prioritized = pool.filter(d => !d.previousWards.includes(ward.id));
+            const others = pool.filter(d => d.previousWards.includes(ward.id));
+            
+            // Sort both for randomness
+            prioritized.sort(() => Math.random() - 0.5);
+            others.sort(() => Math.random() - 0.5);
+            
+            const combined = [...prioritized, ...others];
+            for (let i = 0; i < count && combined.length > 0; i++) {
+                const d = combined.shift()!;
+                wardAssignments.push(d.id);
+                assignedDoctorIds.add(d.id);
+            }
+        };
+
+        if (genderDiversity === 'Specific') {
+            pickFromPool(getEligible('Male'), requiredMale);
+            pickFromPool(getEligible('Female'), requiredFemale);
+        } else if (genderDiversity === 'Balanced') {
+            const half = Math.ceil(totalDoctors / 2);
+            pickFromPool(getEligible('Male'), half);
+            pickFromPool(getEligible('Female'), totalDoctors - wardAssignments.length);
         }
 
-        // Phase 2: If still need doctors, take any available staff who isn't already working this month
-        if (wardAssignments.length < totalDoctors) {
-            let fallbackPool = doctors.filter(d => !assignedDoctorIds.has(d.id));
-            fallbackPool.sort(() => Math.random() - 0.5);
-            while (wardAssignments.length < totalDoctors && fallbackPool.length > 0) {
-                const d = fallbackPool.pop()!; wardAssignments.push(d.id); assignedDoctorIds.add(d.id);
-            }
+        // Final Fill: If still need doctors (or if policy was 'None')
+        const remainingNeeded = totalDoctors - wardAssignments.length;
+        if (remainingNeeded > 0) {
+            pickFromPool(getEligible(), remainingNeeded);
         }
 
         if (wardAssignments.length > 0) {
@@ -151,25 +170,34 @@ export function useStaffingData() {
           const daysInMonth = new Date(year, month, 0).getDate();
 
           for (const assignment of assignments) {
-              const ward = wardMap.get(assignment.wardId);
+              const ward = data.wards.find(w => w.id === assignment.wardId);
               if (!ward) continue;
-              const { shiftDuration, staffPerShift } = ward.requirements;
-              const slotsPerDay = (24 / parseInt(shiftDuration)) * staffPerShift;
-              const pool = [...assignment.doctorIds];
-              let poolIndex = 0;
+
+              // IF THIS IS A SUBORDINATE WARD: Skip it (its members are counted in the main ward)
+              if (ward.parentWardId) continue;
+
+              // IF THIS IS A MAIN WARD: Get all subordinate assignments
+              const subordinates = data.wards.filter(w => w.parentWardId === ward.id);
+              const subAssignments = assignments.filter(a => subordinates.some(s => s.id === a.wardId));
+              
+              // Combined Pool: Main Ward Doctors + All Subordinate Ward Doctors
+              const combinedDoctorPool = [...assignment.doctorIds, ...subAssignments.flatMap(a => a.doctorIds)];
+              
+              if (combinedDoctorPool.length === 0) continue;
+
+              const { staffPerShift, shiftDuration } = ward.requirements;
+              const shiftsPerDay = shiftDuration === '6h' ? 4 : shiftDuration === '12h' ? 2 : 1;
+              const totalDailySlots = shiftsPerDay * staffPerShift;
 
               for (let day = 1; day <= daysInMonth; day++) {
-                  for (let slot = 0; slot < slotsPerDay; slot++) {
-                      const doctorId = pool[poolIndex % pool.length];
-                      newShifts.push({
-                          id: `${period}-${day}-${ward.id}-${slot}`,
-                          period,
-                          day,
-                          wardId: ward.id,
-                          slotIndex: slot,
-                          doctorId
+                  let available = [...combinedDoctorPool].sort(() => Math.random() - 0.5);
+                  for (let slot = 0; slot < totalDailySlots; slot++) {
+                      if (available.length === 0) available = [...combinedDoctorPool].sort(() => Math.random() - 0.5);
+                      const dId = available.pop()!;
+                      newShifts.push({ 
+                          id: `${period}-${day}-${ward.id}-${slot}`, 
+                          period, day, wardId: ward.id, slotIndex: slot, doctorId: dId 
                       });
-                      poolIndex++;
                   }
               }
           }

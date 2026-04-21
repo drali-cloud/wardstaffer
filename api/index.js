@@ -27,7 +27,7 @@ async function ensureTables() {
   // Execute all table creations in parallel
   await Promise.all([
     sql(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, password TEXT, "previousWards" TEXT NOT NULL)`),
-    sql(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL)`),
+    sql(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL, "parentWardId" TEXT)`),
     sql(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, period TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS shifts (id TEXT PRIMARY KEY, period TEXT NOT NULL, day INTEGER NOT NULL, "wardId" TEXT NOT NULL, "slotIndex" INTEGER NOT NULL, "doctorId" TEXT NOT NULL)`)
   ]);
@@ -35,6 +35,7 @@ async function ensureTables() {
   try { await sql(`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS password TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
+  try { await sql(`ALTER TABLE wards ADD COLUMN IF NOT EXISTS "parentWardId" TEXT`); } catch(e){}
   // Clean up legacy columns that might cause NOT NULL violations
   try { await sql(`ALTER TABLE assignments ALTER COLUMN "date" DROP NOT NULL`); } catch(e){}
   try { await sql(`ALTER TABLE assignments DROP COLUMN IF EXISTS "date"`); } catch(e){}
@@ -76,12 +77,13 @@ async function upsertDoctor(d) {
 async function upsertWard(w) {
     const sql = getSql();
     await sql(`
-        INSERT INTO wards (id, name, requirements) 
-        VALUES ($1, $2, $3) 
+        INSERT INTO wards (id, name, requirements, "parentWardId") 
+        VALUES ($1, $2, $3, $4) 
         ON CONFLICT (id) DO UPDATE SET 
             name = EXCLUDED.name, 
-            requirements = EXCLUDED.requirements
-    `, [w.id, w.name, JSON.stringify(w.requirements)]);
+            requirements = EXCLUDED.requirements,
+            "parentWardId" = EXCLUDED."parentWardId"
+    `, [w.id, w.name, JSON.stringify(w.requirements), w.parentWardId || null]);
 }
 
 async function upsertAssignment(a) {

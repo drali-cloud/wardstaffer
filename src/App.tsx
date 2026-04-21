@@ -322,8 +322,73 @@ const DoctorsView = React.memo(({ staffing, user }: { staffing: any, user: AuthU
 
 const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUser }) => {
     const [showAdd, setShowAdd] = useState(false); const [editingId, setEditingId] = useState<string | null>(null); const [newWard, setNewWard] = useState<Partial<Ward>>({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' } });
-    const handleAdd = () => { if (!newWard.name) return; const payload = { id: editingId || `ward-${Math.random().toString(36).substr(2, 5)}`, name: newWard.name.trim(), requirements: { totalDoctors: newWard.requirements?.totalDoctors || 2, genderDiversity: newWard.requirements?.genderDiversity || 'None', staffPerShift: newWard.requirements?.staffPerShift || 1, shiftDuration: newWard.requirements?.shiftDuration || '12h' } }; if (editingId) staffing.updateWard(payload); else staffing.addWard(payload); setShowAdd(false); setEditingId(null); setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' } }); };
-    return (<div className="space-y-6"><div className="flex justify-between items-end bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><div><h2 className="text-xl font-bold text-slate-800">Unit Configuration</h2></div>{user.role === 'admin' && (<button className="btn-primary" onClick={() => setShowAdd(!showAdd)}><Plus className="w-4 h-4" /> Add Unit</button>)}</div><AnimatePresence>{showAdd && user.role === 'admin' && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div className="technical-card p-8 space-y-6 bg-white mb-6 border-blue-100 ring-1 ring-blue-50"><div className="grid grid-cols-1 md:grid-cols-4 gap-6"><div className="md:col-span-2"><label className="text-[10px] uppercase font-bold text-slate-400">Designation</label><input type="text" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.name} onChange={e => setNewWard(prev => ({ ...prev, name: e.target.value }))} /></div><div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1|2 } }))}><option value={1}>1 Physician</option><option value={2}>2 Physicians</option></select></div><div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div><div><label className="text-[10px] uppercase font-bold text-slate-400">Monthly Capacity</label><input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.totalDoctors} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, totalDoctors: parseInt(e.target.value) } }))} /></div></div><div className="flex gap-3 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save Unit</button></div></div></motion.div>)}</AnimatePresence><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Shift Specs</th><th className="col-header">Capacity</th>{user.role === 'admin' && <th className="col-header text-right">Actions</th>}</tr></thead><tbody className="text-sm divide-y divide-slate-100">{staffing.wards.map((w: Ward) => (<tr key={w.id} className="hover:bg-slate-50/50 group"><td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{w.id}</td><td className="px-6 py-4 font-semibold text-slate-800">{w.name}</td><td className="px-6 py-4"><div className="flex gap-2"><span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded border border-blue-100 flex items-center gap-1"><Activity className="w-3 h-3" /> {w.requirements.staffPerShift} Doc</span><span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Clock className="w-3 h-3" /> {w.requirements.shiftDuration}</span></div></td><td className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase">{w.requirements.totalDoctors} Total Staff</td>{user.role === 'admin' && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(w.id); setNewWard(w); setShowAdd(true); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100" onClick={() => { if(confirm('Remove?')) staffing.deleteWard(w.id); }}><Trash2 className="w-4 h-4" /></button></td>}</tr>))}</tbody></table></div></div>);
+    const handleAdd = () => { 
+        if (!newWard.name) return; 
+        const payload = { 
+            id: editingId || `ward-${Math.random().toString(36).substr(2, 5)}`, 
+            name: newWard.name.trim(), 
+            parentWardId: newWard.parentWardId,
+            requirements: { 
+                totalDoctors: Number(newWard.requirements?.totalDoctors || 2), 
+                genderDiversity: newWard.requirements?.genderDiversity || 'None', 
+                requiredMale: Number(newWard.requirements?.requiredMale || 0),
+                requiredFemale: Number(newWard.requirements?.requiredFemale || 0),
+                staffPerShift: Number(newWard.requirements?.staffPerShift || 1) as 1|2, 
+                shiftDuration: newWard.requirements?.shiftDuration || '12h' 
+            } 
+        }; 
+        if (editingId) staffing.updateWard(payload); else staffing.addWard(payload); 
+        setShowAdd(false); setEditingId(null); setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' } }); 
+    };
+    return (
+        <div className="space-y-6">
+            <div className="flex justify-between items-end bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><div><h2 className="text-xl font-bold text-slate-800">Unit Configuration</h2></div>{user.role === 'admin' && (<button className="btn-primary" onClick={() => setShowAdd(!showAdd)}><Plus className="w-4 h-4" /> Add Unit</button>)}</div>
+            <AnimatePresence>{showAdd && user.role === 'admin' && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                    <div className="technical-card p-8 space-y-6 bg-white mb-6 border-blue-100 ring-1 ring-blue-50">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                            <div className="md:col-span-2"><label className="text-[10px] uppercase font-bold text-slate-400">Designation</label><input type="text" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.name} onChange={e => setNewWard(prev => ({ ...prev, name: e.target.value }))} /></div>
+                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Monthly Capacity</label><input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.totalDoctors} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, totalDoctors: parseInt(e.target.value) } }))} /></div>
+                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Gender Policy</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.genderDiversity} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, genderDiversity: e.target.value as any } }))}><option value="None">No Preference</option><option value="Balanced">Balanced Mix</option><option value="Specific">Specific Quota</option></select></div>
+                        </div>
+                        {newWard.requirements?.genderDiversity === 'Specific' && (
+                            <div className="grid grid-cols-2 gap-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Male</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg" value={newWard.requirements?.requiredMale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredMale: parseInt(e.target.value) } }))} /></div>
+                                <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Female</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg" value={newWard.requirements?.requiredFemale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredFemale: parseInt(e.target.value) } }))} /></div>
+                            </div>
+                        )}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
+                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Hierarchy</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.parentWardId || ''} onChange={e => setNewWard(prev => ({ ...prev, parentWardId: e.target.value || undefined }))}><option value="">Main Unit (Stand-alone)</option>{staffing.wards.filter((w: Ward) => w.id !== editingId).map((w: Ward) => (<option key={w.id} value={w.id}>Subordinate to {w.name}</option>)}</select></div>
+                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1|2 } }))}><option value={1}>1 Physician Per Shift</option><option value={2}>2 Physicians Per Shift</option></select></div>
+                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div>
+                        </div>
+                        <div className="flex gap-3 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save Unit</button></div>
+                    </div>
+                </motion.div>
+            )}</AnimatePresence>
+            <div className="technical-card overflow-hidden">
+                <table className="technical-grid">
+                    <thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Shift Specs</th><th className="col-header">Status</th><th className="col-header">Capacity</th>{user.role === 'admin' && <th className="col-header text-right">Actions</th>}</tr></thead>
+                    <tbody className="text-sm divide-y divide-slate-100">
+                        {staffing.wards.map((w: Ward) => (
+                            <tr key={w.id} className="hover:bg-slate-50/50 group"><td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{w.id}</td><td className="px-6 py-4 font-semibold text-slate-800">{w.name}</td>
+                            <td className="px-6 py-4"><div className="flex gap-2"><span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded border border-blue-100 flex items-center gap-1"><Activity className="w-3 h-3" /> {w.requirements.staffPerShift} Doc</span><span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Clock className="w-3 h-3" /> {w.requirements.shiftDuration}</span></div></td>
+                            <td className="px-6 py-4">
+                                {w.parentWardId ? (
+                                    <span className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Link className="w-3 h-3" /> Sub to {staffing.wardMap.get(w.parentWardId)?.name}</span>
+                                ) : (
+                                    <span className="px-2 py-0.5 bg-green-50 text-green-600 text-[9px] font-bold uppercase rounded border border-green-100">Main Station</span>
+                                )}
+                            </td>
+                            <td className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase">{w.requirements.totalDoctors} Total Staff</td>
+                            {user.role === 'admin' && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(w.id); setNewWard(w); setShowAdd(true); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100" onClick={() => { if(confirm('Remove?')) staffing.deleteWard(w.id); }}><Trash2 className="w-4 h-4" /></button></td>}</tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+});
 });
 
 const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staffing: any, user: AuthUser, selectedPeriod: string | null, onSelect: (m: string | null) => void }) => {

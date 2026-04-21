@@ -21,6 +21,7 @@ export interface Ward {
   id: string;
   name: string;
   requirements: WardRequirements;
+  parentWardId?: string;
 }
 
 export interface ShiftRecord {
