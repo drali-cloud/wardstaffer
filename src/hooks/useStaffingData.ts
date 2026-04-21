@@ -347,17 +347,17 @@ export function useStaffingData() {
         const newERShifts: ShiftRecord[] = [];
         
         const categories = [
-            { id: 'er-men', name: 'Men', slots: 4, wards: config.men },
-            { id: 'er-women', name: 'Women', slots: 4, wards: config.women },
-            { id: 'er-pediatric', name: 'Pediatric', slots: 3, wards: config.pediatric }
+            { id: 'er-men', name: 'Men', slots: [2, 4, 4, 2], wards: config.men, duration: 6 },
+            { id: 'er-women', name: 'Women', slots: [2, 4, 4, 2], wards: config.women, duration: 6 },
+            { id: 'er-pediatric', name: 'Pediatric', slots: [1, 1, 1], wards: config.pediatric, duration: 8 } // Assuming 1 for peds for now or keep default
         ];
 
-        // Track used doctors for circular queue per category
-        const catQueues: Record<string, string[]> = {};
+        // Track cumulative hours per doctor for the period
+        const hoursMap: Record<string, number> = {};
+        data.doctors.forEach(d => hoursMap[d.id] = 0);
 
         for (let day = 1; day <= daysInMonth; day++) {
             categories.forEach(cat => {
-                // Pool doctors from assigned wards
                 const pool = new Set<string>();
                 cat.wards.forEach(wId => {
                     const assignment = data.assignments.find(a => a.period === period && a.wardId === wId);
@@ -367,38 +367,28 @@ export function useStaffingData() {
                 const poolArray = Array.from(pool);
                 if (poolArray.length === 0) return;
 
-                if (!catQueues[cat.id] || catQueues[cat.id].length === 0) catQueues[cat.id] = [...poolArray].sort(() => Math.random() - 0.5);
+                cat.slots.forEach((staffCount, slotIdx) => {
+                    for (let s = 0; s < staffCount; s++) {
+                        const eligible = poolArray
+                            .filter(candidate => {
+                                const hasWardShiftToday = wardShifts.some(s => s.day === day && s.doctorId === candidate);
+                                const hasWardShiftYesterday = wardShifts.some(s => s.day === day - 1 && s.doctorId === candidate);
+                                const hasWardShiftTomorrow = wardShifts.some(s => s.day === day + 1 && s.doctorId === candidate);
+                                const hasOtherERToday = newERShifts.some(s => s.day === day && s.doctorId === candidate);
+                                return !hasWardShiftToday && !hasWardShiftYesterday && !hasWardShiftTomorrow && !hasOtherERToday;
+                            })
+                            .sort((a, b) => hoursMap[a] - hoursMap[b]);
 
-                for (let slot = 0; slot < cat.slots; slot++) {
-                    let assigned = false;
-                    let attempts = 0;
-                    
-                    while (!assigned && attempts < catQueues[cat.id].length) {
-                        const candidate = catQueues[cat.id][0];
-                        catQueues[cat.id].shift();
-                        
-                        // Conflict Check: 
-                        // 1. Same day ward shift
-                        const hasWardShiftToday = wardShifts.some(s => s.day === day && s.doctorId === candidate);
-                        // 2. Yesterday ward shift (rest period)
-                        const hasWardShiftYesterday = wardShifts.some(s => s.day === day - 1 && s.doctorId === candidate);
-                        // 3. Tomorrow ward shift (rest period)
-                        const hasWardShiftTomorrow = wardShifts.some(s => s.day === day + 1 && s.doctorId === candidate);
-                        // 4. Same day other ER call
-                        const hasOtherERToday = newERShifts.some(s => s.day === day && s.doctorId === candidate);
-
-                        if (!hasWardShiftToday && !hasWardShiftYesterday && !hasWardShiftTomorrow && !hasOtherERToday) {
+                        if (eligible.length > 0) {
+                            const candidate = eligible[0];
                             newERShifts.push({
-                                id: `er-${cat.id}-${day}-${slot}`,
-                                period, day, wardId: cat.id, doctorId: candidate, slotIndex: slot
+                                id: `er-${cat.id}-${day}-${slotIdx}-${s}`,
+                                period, day, wardId: cat.id, doctorId: candidate, slotIndex: slotIdx
                             });
-                            assigned = true;
+                            hoursMap[candidate] += cat.duration;
                         }
-                        
-                        catQueues[cat.id].push(candidate); // Move to back
-                        attempts++;
                     }
-                }
+                });
             });
         }
 

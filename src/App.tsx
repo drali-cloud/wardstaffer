@@ -341,20 +341,43 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots }: {
     return (
         <div className="space-y-4">
             <h4 className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full w-fit ${colors[color]}`}>{title} Department</h4>
-            <div className="space-y-2">
+            <div className="space-y-3">
                 {slots.map((time, idx) => {
-                    const shift = dayShifts.find(s => s.slotIndex === idx);
+                    const slotShifts = dayShifts.filter(s => s.slotIndex === idx);
+                    const isHighDensity = (idx === 1 || idx === 2) && wardId !== 'er-pediatric';
                     return (
                         <div key={idx} className="p-3 bg-white rounded-xl border border-slate-100 shadow-sm group hover:border-blue-200 transition-all">
-                            <p className="text-[8px] font-bold text-slate-400 uppercase mb-1">{time}</p>
-                            {shift ? (
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-bold text-slate-800 truncate">{staffing.doctorMap.get(shift.doctorId)?.name}</span>
-                                    <button className="text-slate-300 hover:text-red-600 p-1"><Edit2 className="w-3 h-3" /></button>
-                                </div>
-                            ) : (
-                                <span className="text-[9px] text-slate-300 italic">No duty assigned</span>
-                            )}
+                            <p className="text-[8px] font-bold text-slate-400 uppercase mb-2">{time}</p>
+                            <div className="space-y-2">
+                                {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 1 : 2) }).map((_, sIdx) => {
+                                    const shift = slotShifts[sIdx];
+                                    let badgeColor = 'bg-slate-50 text-slate-400';
+                                    let roleLabel = '';
+                                    
+                                    if (isHighDensity) {
+                                        if (sIdx < 2) {
+                                            badgeColor = 'bg-yellow-50 text-yellow-700 border-yellow-100';
+                                            roleLabel = 'Accidents & Surgery';
+                                        } else {
+                                            badgeColor = 'bg-green-50 text-green-700 border-green-100';
+                                            roleLabel = 'Medical Emergencies';
+                                        }
+                                    } else {
+                                        badgeColor = shift ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-slate-50 text-slate-400';
+                                        roleLabel = 'General ER';
+                                    }
+                                    
+                                    return (
+                                        <div key={sIdx} className={`flex flex-col p-1.5 rounded-lg border ${badgeColor}`}>
+                                            <div className="flex justify-between items-center mb-1">
+                                                <span className="text-[7px] uppercase font-black tracking-tighter opacity-70">{roleLabel}</span>
+                                                {shift && <button className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-600 transition-opacity"><Edit2 className="w-3 h-3" /></button>}
+                                            </div>
+                                            <span className="text-[9px] font-bold truncate">{shift ? staffing.doctorMap.get(shift.doctorId)?.name : 'Unassigned'}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
                     );
                 })}
