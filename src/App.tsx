@@ -264,7 +264,37 @@ const DashboardView = React.memo(({ staffing, user }: { staffing: any, user: Aut
     <div className="space-y-8">
       <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden"><div className="relative z-10"><h2 className="text-2xl font-bold">Hospital Overview</h2><p className="text-blue-100 mt-2 text-sm max-w-lg">{user.role === 'admin' ? "Full Control Mode." : myAssignment ? `Assigned to ${staffing.wardMap.get(myAssignment.wardId)?.name} for ${myAssignment.period}.` : "No active rotation."}</p></div><Hospital className="absolute right-[-20px] bottom-[-20px] w-64 h-64 text-white/10 rotate-12" /></div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><StatCard label="Total Staff" value={staffing.doctors.length} icon={<Users className="w-5 h-5 text-blue-600" />} /><StatCard label="Monthly Wards" value={staffing.wards.length} icon={<Hospital className="w-5 h-5 text-blue-600" />} /><StatCard label="Total Rotations" value={staffing.assignments.length} icon={<Archive className="w-5 h-5 text-blue-600" />} /><StatCard label="Archives" value={new Set(staffing.assignments.map(a => a.period)).size} icon={<Calendar className="w-5 h-5 text-blue-600" />} /></div>
-      {user.role === 'admin' && (<div className="technical-card p-8 border-blue-100 ring-1 ring-blue-50 flex items-center justify-between gap-8"><div><h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Save className="w-4 h-4 text-blue-600" /> Monthly Dispatch Generator</h2><p className="text-xs text-slate-400">Initialize the personnel pool for each ward for the next rotation cycle.</p></div><div className="flex gap-4"><input type="month" className="text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl" value={targetPeriod} onChange={(e) => setTargetPeriod(e.target.value)} /><button disabled={staffing.syncing} onClick={() => { if(confirm(`Generate monthly pool for ${targetPeriod}?`)) staffing.generateMonthlyDispatch(targetPeriod); }} className="btn-primary px-8">Generate Personnel Pool</button></div></div>)}
+      {user.role === 'admin' && (
+        <div className="technical-card p-8 border-blue-100 ring-1 ring-blue-50 flex items-center justify-between gap-8">
+          <div>
+            <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Save className="w-4 h-4 text-blue-600" /> Monthly Dispatch Generator</h2>
+            <p className="text-xs text-slate-400">Initialize the personnel pool for each ward for the next rotation cycle.</p>
+          </div>
+          <div className="flex gap-4">
+            <input type="month" className="text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl" value={targetPeriod} onChange={(e) => setTargetPeriod(e.target.value)} />
+            <button disabled={staffing.syncing} onClick={() => { if(confirm(`Generate monthly pool for ${targetPeriod}?`)) staffing.generateMonthlyDispatch(targetPeriod); }} className="btn-primary px-8">Generate Personnel Pool</button>
+            <button onClick={() => {
+                const periodAssignments = staffing.assignments.filter((a: Assignment) => a.period === targetPeriod);
+                if (periodAssignments.length === 0) { alert('No dispatch found for this period.'); return; }
+                const gridRows: any[] = [];
+                let maxDocs = 0; const wardToDocs: Record<string, string[]> = {};
+                staffing.wards.forEach(w => {
+                    const assignment = periodAssignments.find(a => a.wardId === w.id);
+                    const docNames = (assignment?.doctorIds || []).map(id => staffing.doctorMap.get(id)?.name || 'Unknown');
+                    wardToDocs[w.name] = docNames; maxDocs = Math.max(maxDocs, docNames.length);
+                });
+                for (let i = 0; i < maxDocs; i++) {
+                    const row: any = { 'Month': i === 0 ? targetPeriod : '' };
+                    staffing.wards.forEach(w => { row[w.name] = wardToDocs[w.name][i] || ''; });
+                    gridRows.push(row);
+                }
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(gridRows), "Monthly Dispatch");
+                XLSX.writeFile(wb, `Dispatch_${targetPeriod}.xlsx`);
+            }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Download className="w-4 h-4" /> Export Pool</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
