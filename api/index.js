@@ -1,5 +1,5 @@
 import express from 'express';
-import { createPool } from '@vercel/postgres';
+import { neon } from '@neondatabase/serverless';
 
 const app = express();
 app.use(express.json());
@@ -12,40 +12,38 @@ let mockDb = {
 };
 let isUsingMock = false;
 
-let _pool = null;
-function getPool() {
-  if (!_pool) {
-    _pool = createPool({
-      connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
-    });
-  }
-  return _pool;
+// Neon connection (automatically handles SSL)
+let sqlInstance = null;
+function getSql() {
+  if (sqlInstance) return sqlInstance;
+  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!dbUrl) throw new Error('No database connection string found.');
+  sqlInstance = neon(dbUrl);
+  return sqlInstance;
 }
 
 async function ensureTables() {
-  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!dbUrl) {
-    throw new Error('No database connection string found in environment variables.');
-  }
-  await getPool().query('SELECT 1'); // Test connection
-  
-  await getPool().query(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, "previousWards" TEXT NOT NULL)`);
-  await getPool().query(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL)`);
-  await getPool().query(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, date TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`);
+  const sql = getSql();
+  // Execute all table creations in parallel for speed
+  await Promise.all([
+    sql(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, "previousWards" TEXT NOT NULL)`),
+    sql(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL)`),
+    sql(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, date TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`)
+  ]);
 }
 
 let tablesReady = null;
 async function getTablesReady() {
   try {
     if (!tablesReady) {
-      console.log('Attempting to connect to Postgres...');
-      tablesReady = ensureTables();
+        console.log('Synchronizing with Neon Database...');
+        tablesReady = ensureTables();
     }
     await tablesReady;
     isUsingMock = false;
   } catch (err) {
     if (!isUsingMock) {
-      console.warn('DATABASE CONNECTION FAILED. Falling back to in-memory storage.');
+      console.warn('DATABASE CONNECTION FAILED. Falling back to mock storage.');
       console.warn('Reason:', err.message);
     }
     isUsingMock = true;
@@ -53,12 +51,49 @@ async function getTablesReady() {
   }
 }
 
+// --- Helper: Universal Persist ---
+async function upsertDoctor(d) {
+    const sql = getSql();
+    await sql(`
+        INSERT INTO doctors (id, name, gender, "previousWards") 
+        VALUES ($1, $2, $3, $4) 
+        ON CONFLICT (id) DO UPDATE SET 
+            name = EXCLUDED.name, 
+            gender = EXCLUDED.gender, 
+            "previousWards" = EXCLUDED."previousWards"
+    `, [d.id, d.name, d.gender, JSON.stringify(d.previousWards)]);
+}
+
+async function upsertWard(w) {
+    const sql = getSql();
+    await sql(`
+        INSERT INTO wards (id, name, requirements) 
+        VALUES ($1, $2, $3) 
+        ON CONFLICT (id) DO UPDATE SET 
+            name = EXCLUDED.name, 
+            requirements = EXCLUDED.requirements
+    `, [w.id, w.name, JSON.stringify(w.requirements)]);
+}
+
+async function upsertAssignment(a) {
+    const sql = getSql();
+    await sql(`
+        INSERT INTO assignments (id, date, "wardId", "doctorIds") 
+        VALUES ($1, $2, $3, $4) 
+        ON CONFLICT (id) DO UPDATE SET 
+            date = EXCLUDED.date, 
+            "wardId" = EXCLUDED."wardId", 
+            "doctorIds" = EXCLUDED."doctorIds"
+    `, [a.id, a.date, a.wardId, JSON.stringify(a.doctorIds)]);
+}
+
 // --- Doctors ---
 app.get('/api/doctors', async (req, res) => {
   await getTablesReady();
   if (isUsingMock) return res.json(mockDb.doctors);
   try {
-    const { rows } = await getPool().query('SELECT * FROM doctors ORDER BY name ASC');
+    const sql = getSql();
+    const rows = await sql('SELECT * FROM doctors ORDER BY name ASC');
     res.json(rows.map(r => ({ ...r, previousWards: JSON.parse(r.previousWards) })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -71,7 +106,7 @@ app.post('/api/doctors', async (req, res) => {
     return res.json({ success: true, mode: 'mock' });
   }
   try {
-    await getPool().query('INSERT INTO doctors (id, name, gender, "previousWards") VALUES ($1, $2, $3, $4)', [id, name, gender, JSON.stringify(previousWards)]);
+    await upsertDoctor({ id, name, gender, previousWards });
     res.status(201).json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -85,7 +120,7 @@ app.put('/api/doctors/:id', async (req, res) => {
     return res.json({ success: true });
   }
   try {
-    await getPool().query('UPDATE doctors SET name = $1, gender = $2, "previousWards" = $3 WHERE id = $4', [name, gender, JSON.stringify(previousWards), req.params.id]);
+    await upsertDoctor({ id: req.params.id, name, gender, previousWards });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -97,7 +132,8 @@ app.delete('/api/doctors/:id', async (req, res) => {
     return res.json({ success: true });
   }
   try {
-    await getPool().query('DELETE FROM doctors WHERE id = $1', [req.params.id]);
+    const sql = getSql();
+    await sql('DELETE FROM doctors WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -107,7 +143,8 @@ app.get('/api/wards', async (req, res) => {
   await getTablesReady();
   if (isUsingMock) return res.json(mockDb.wards);
   try {
-    const { rows } = await getPool().query('SELECT * FROM wards');
+    const sql = getSql();
+    const rows = await sql('SELECT * FROM wards ORDER BY name ASC');
     res.json(rows.map(r => ({ ...r, requirements: JSON.parse(r.requirements) })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -120,7 +157,7 @@ app.post('/api/wards', async (req, res) => {
     return res.json({ success: true });
   }
   try {
-    await getPool().query('INSERT INTO wards (id, name, requirements) VALUES ($1, $2, $3)', [id, name, JSON.stringify(requirements)]);
+    await upsertWard({ id, name, requirements });
     res.status(201).json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -134,7 +171,20 @@ app.put('/api/wards/:id', async (req, res) => {
     return res.json({ success: true });
   }
   try {
-    await getPool().query('UPDATE wards SET name = $1, requirements = $2 WHERE id = $3', [name, JSON.stringify(requirements), req.params.id]);
+    await upsertWard({ id: req.params.id, name, requirements });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/wards/:id', async (req, res) => {
+  await getTablesReady();
+  if (isUsingMock) {
+    mockDb.wards = mockDb.wards.filter(w => w.id !== req.params.id);
+    return res.json({ success: true });
+  }
+  try {
+    const sql = getSql();
+    await sql('DELETE FROM wards WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -144,7 +194,8 @@ app.get('/api/assignments', async (req, res) => {
   await getTablesReady();
   if (isUsingMock) return res.json(mockDb.assignments);
   try {
-    const { rows } = await getPool().query('SELECT * FROM assignments');
+    const sql = getSql();
+    const rows = await sql('SELECT * FROM assignments');
     res.json(rows.map(r => ({ ...r, doctorIds: JSON.parse(r.doctorIds) })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -161,17 +212,29 @@ app.post('/api/assignments', async (req, res) => {
     return res.json({ success: true });
   }
   try {
-    for (const a of assignments) {
-      await getPool().query(`INSERT INTO assignments (id, date, "wardId", "doctorIds") VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET date = EXCLUDED.date, "wardId" = EXCLUDED."wardId", "doctorIds" = EXCLUDED."doctorIds"`, [a.id, a.date, a.wardId, JSON.stringify(a.doctorIds)]);
-    }
+    // Process all assignments in parallel
+    await Promise.all(assignments.map(a => upsertAssignment(a)));
     res.status(201).json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/assignments', async (req, res) => {
+  await getTablesReady();
+  if (isUsingMock) {
+    mockDb.assignments = [];
+    return res.json({ success: true });
+  }
+  try {
+    const sql = getSql();
+    await sql('DELETE FROM assignments');
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // --- Bulk Import ---
 app.post('/api/import', async (req, res) => {
   await getTablesReady();
-  const { doctors } = req.body;
+  const { doctors, wards } = req.body;
   if (isUsingMock) {
     if (doctors) {
         for (const d of doctors) {
@@ -180,14 +243,20 @@ app.post('/api/import', async (req, res) => {
             else mockDb.doctors.push(d);
         }
     }
+    if (wards) {
+        for (const w of wards) {
+            const idx = mockDb.wards.findIndex(exist => exist.id === w.id);
+            if (idx > -1) mockDb.wards[idx] = w;
+            else mockDb.wards.push(w);
+        }
+    }
     return res.json({ success: true });
   }
   try {
-    if (doctors) {
-      for (const d of doctors) {
-        await getPool().query(`INSERT INTO doctors (id, name, gender, "previousWards") VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, gender = EXCLUDED.gender, "previousWards" = EXCLUDED."previousWards"`, [d.id, d.name, d.gender, JSON.stringify(d.previousWards)]);
-      }
-    }
+    const promises = [];
+    if (doctors) promises.push(...doctors.map(d => upsertDoctor(d)));
+    if (wards) promises.push(...wards.map(w => upsertWard(w)));
+    await Promise.all(promises);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -195,9 +264,9 @@ app.post('/api/import', async (req, res) => {
 // --- Debug ---
 app.get('/api/debug-db', async (req, res) => {
   try {
-    await ensureTables();
-    const { rows } = await getPool().query('SELECT NOW() as now');
-    res.json({ status: 'connected', mode: 'postgres' });
+    const sql = getSql();
+    const rows = await sql('SELECT NOW()');
+    res.json({ status: 'connected', time: rows[0], mode: 'postgres (neon)' });
   } catch (e) {
     res.json({ status: 'error', message: e.message, mode: 'mock' });
   }

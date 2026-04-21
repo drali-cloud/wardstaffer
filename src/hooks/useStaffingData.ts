@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Doctor, Ward, Assignment, Gender } from '../types';
 
 interface StaffingData {
@@ -10,6 +10,11 @@ interface StaffingData {
 export function useStaffingData() {
   const [data, setData] = useState<StaffingData>({ doctors: [], wards: [], assignments: [] });
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+
+  // Memoized helpers
+  const doctorMap = useMemo(() => new Map(data.doctors.map(d => [d.id, d])), [data.doctors]);
+  const wardMap = useMemo(() => new Map(data.wards.map(w => [w.id, w])), [data.wards]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -21,20 +26,20 @@ export function useStaffingData() {
       ]);
       
       if (!docsResp.ok || !wardsResp.ok || !assignmentsResp.ok) {
-        throw new Error('Server returned an error while fetching data.');
+        throw new Error('Server synchronization failed.');
       }
       
-      const doctors = await docsResp.json();
-      const wards = await wardsResp.json();
-      const assignments = await assignmentsResp.json();
+      const [doctors, wards, assignments] = await Promise.all([
+        docsResp.json(),
+        wardsResp.json(),
+        assignmentsResp.json()
+      ]);
       
       if (Array.isArray(doctors) && Array.isArray(wards) && Array.isArray(assignments)) {
         setData({ doctors, wards, assignments });
-      } else {
-        console.error('Invalid data format received from server', { doctors, wards, assignments });
       }
     } catch (e) {
-      console.error('Failed to fetch data from Postgres:', e);
+      console.error('Fetch error:', e);
     } finally {
       setLoading(false);
     }
@@ -44,67 +49,101 @@ export function useStaffingData() {
     fetchData();
   }, [fetchData]);
 
-  const addDoctor = useCallback(async (doctor: Doctor) => {
+  const executeAction = useCallback(async (action: () => Promise<Response>, onSuccess: () => void, errorMsg: string) => {
+    setSyncing(true);
     try {
-        const resp = await fetch('/api/doctors', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(doctor)
-        });
-        if (resp.ok) {
-          setData(prev => ({ ...prev, doctors: [...prev.doctors, doctor] }));
-        } else {
-          const err = await resp.json();
-          alert('Failed to save doctor: ' + (err.error || 'Unknown error'));
-        }
+      const resp = await action();
+      if (resp.ok) {
+        onSuccess();
+      } else {
+        const text = await resp.text();
+        alert(`${errorMsg}: ${text}`);
+      }
     } catch (e) {
-        console.error('Failed to add doctor', e);
+      console.error(errorMsg, e);
+      alert(`${errorMsg}: Network or server error.`);
+    } finally {
+      setSyncing(false);
     }
   }, []);
 
-  const deleteDoctor = useCallback(async (id: string) => {
-    try {
-        const resp = await fetch(`/api/doctors/${id}`, { method: 'DELETE' });
-        if (resp.ok) {
-          setData(prev => ({ ...prev, doctors: prev.doctors.filter(d => d.id !== id) }));
-        }
-    } catch (e) {
-        console.error('Failed to delete doctor', e);
-    }
-  }, []);
+  const addDoctor = useCallback((doctor: Doctor) => {
+    executeAction(
+      () => fetch('/api/doctors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(doctor)
+      }),
+      () => setData(prev => ({ ...prev, doctors: [...prev.doctors, doctor] })),
+      'Failed to register physician'
+    );
+  }, [executeAction]);
 
-  const addWard = useCallback(async (ward: Ward) => {
-    try {
-        const resp = await fetch('/api/wards', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(ward)
-        });
-        if (resp.ok) {
-          setData(prev => ({ ...prev, wards: [...prev.wards, ward] }));
-        } else {
-          const err = await resp.json();
-          alert('Failed to save ward: ' + (err.error || 'Unknown error'));
-        }
-    } catch (e) {
-        console.error('Failed to add ward', e);
-    }
-  }, []);
+  const updateDoctor = useCallback((doctor: Doctor) => {
+    executeAction(
+      () => fetch(`/api/doctors/${doctor.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(doctor)
+      }),
+      () => setData(prev => ({
+        ...prev,
+        doctors: prev.doctors.map(d => d.id === doctor.id ? doctor : d)
+      })),
+      'Failed to update physician'
+    );
+  }, [executeAction]);
 
-  const deleteWard = useCallback(async (id: string) => {
-    try {
-        await fetch(`/api/wards/${id}`, { method: 'DELETE' });
-        setData(prev => ({ ...prev, wards: prev.wards.filter(w => w.id !== id) }));
-    } catch (e) {
-        console.error('Failed to delete ward', e);
-    }
-  }, []);
+  const deleteDoctor = useCallback((id: string) => {
+    executeAction(
+      () => fetch(`/api/doctors/${id}`, { method: 'DELETE' }),
+      () => setData(prev => ({ ...prev, doctors: prev.doctors.filter(d => d.id !== id) })),
+      'Failed to remove physician'
+    );
+  }, [executeAction]);
+
+  const addWard = useCallback((ward: Ward) => {
+    executeAction(
+      () => fetch('/api/wards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ward)
+      }),
+      () => setData(prev => ({ ...prev, wards: [...prev.wards, ward] })),
+      'Failed to initialize ward'
+    );
+  }, [executeAction]);
+
+  const updateWard = useCallback((ward: Ward) => {
+    executeAction(
+      () => fetch(`/api/wards/${ward.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ward)
+      }),
+      () => setData(prev => ({
+        ...prev,
+        wards: prev.wards.map(w => w.id === ward.id ? ward : w)
+      })),
+      'Failed to update ward metrics'
+    );
+  }, [executeAction]);
+
+  const deleteWard = useCallback((id: string) => {
+    executeAction(
+      () => fetch(`/api/wards/${id}`, { method: 'DELETE' }),
+      () => setData(prev => ({ ...prev, wards: prev.wards.filter(w => w.id !== id) })),
+      'Failed to decommission ward'
+    );
+  }, [executeAction]);
 
   const generateAssignments = useCallback(async (date: string) => {
+    // We use a snapshot of the current data for calculation
     const { doctors, wards } = data;
     const newAssignments: Assignment[] = [];
     const assignedDoctorIds = new Set<string>();
 
+    // Priority sorting or randomization
     const shuffledWards = [...wards].sort(() => Math.random() - 0.5);
 
     for (const ward of shuffledWards) {
@@ -182,14 +221,17 @@ export function useStaffingData() {
     }
 
     if (newAssignments.length > 0) {
+        setSyncing(true);
         try {
-            await fetch('/api/assignments', {
+            const resp = await fetch('/api/assignments', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(newAssignments)
             });
             
-            const updatedDoctors = [...doctors].map(doc => {
+            if (!resp.ok) throw new Error('Failed to save assignments');
+
+            const updatedDoctors = doctors.map(doc => {
                 const assignment = newAssignments.find(a => a.doctorIds.includes(doc.id));
                 if (assignment && !doc.previousWards.includes(assignment.wardId)) {
                     return { ...doc, previousWards: [...doc.previousWards, assignment.wardId] };
@@ -197,7 +239,6 @@ export function useStaffingData() {
                 return doc;
             });
 
-            // Update doctors previous wards on server
             const doctorsToUpdate = updatedDoctors.filter(d => 
                 newAssignments.some(a => a.doctorIds.includes(d.id))
             );
@@ -216,7 +257,10 @@ export function useStaffingData() {
                 assignments: [...prev.assignments, ...newAssignments]
             }));
         } catch (e) {
-            console.error('Failed to sync assignments to server', e);
+            console.error('Assignment sync error:', e);
+            alert('Assignments generated but failed to sync to cloud.');
+        } finally {
+            setSyncing(false);
         }
     }
 
@@ -224,79 +268,29 @@ export function useStaffingData() {
   }, [data]);
 
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
-      try {
-          const resp = await fetch('/api/import', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newData)
-          });
-          if (resp.ok) {
-            await fetchData();
-          } else {
-            const text = await resp.text();
-            alert('Import failed: ' + text);
-          }
-      } catch (e) {
-          console.error('Failed to import data', e);
-      }
-  }, [fetchData]);
+    executeAction(
+      () => fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newData)
+      }),
+      () => fetchData(),
+      'Data import failed'
+    );
+  }, [executeAction, fetchData]);
 
-  const clearAssignments = useCallback(async () => {
-    try {
-        const resp = await fetch('/api/assignments', { method: 'DELETE' });
-        if (resp.ok) {
-          setData(prev => ({ ...prev, assignments: [] }));
-        }
-    } catch (e) {
-        console.error('Failed to clear assignments', e);
-    }
-  }, []);
-
-  const updateDoctor = useCallback(async (doctor: Doctor) => {
-    try {
-        const resp = await fetch(`/api/doctors/${doctor.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(doctor)
-        });
-        if (resp.ok) {
-          setData(prev => ({
-              ...prev,
-              doctors: prev.doctors.map(d => d.id === doctor.id ? doctor : d)
-          }));
-        } else {
-          const text = await resp.text();
-          alert('Update failed: ' + text);
-        }
-    } catch (e) {
-        console.error('Failed to update doctor', e);
-    }
-  }, []);
-
-  const updateWard = useCallback(async (ward: Ward) => {
-    try {
-        const resp = await fetch(`/api/wards/${ward.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(ward)
-        });
-        if (resp.ok) {
-          setData(prev => ({
-              ...prev,
-              wards: prev.wards.map(w => w.id === ward.id ? ward : w)
-          }));
-        } else {
-          const text = await resp.text();
-          alert('Update failed: ' + text);
-        }
-    } catch (e) {
-        console.error('Failed to update ward', e);
-    }
-  }, []);
+  const clearAssignments = useCallback(() => {
+    executeAction(
+      () => fetch('/api/assignments', { method: 'DELETE' }),
+      () => setData(prev => ({ ...prev, assignments: [] })),
+      'Failed to clear assignments'
+    );
+  }, [executeAction]);
 
   return {
     ...data,
     loading,
+    syncing,
     addDoctor,
     deleteDoctor,
     updateDoctor,
@@ -305,6 +299,8 @@ export function useStaffingData() {
     updateWard,
     generateAssignments,
     importData,
-    clearAssignments
+    clearAssignments,
+    doctorMap,
+    wardMap
   };
 }
