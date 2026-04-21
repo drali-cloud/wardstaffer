@@ -1,78 +1,18 @@
 import express from 'express';
-import { createPool } from '@vercel/postgres';
+import { PrismaClient } from '@prisma/client';
 
 const app = express();
 app.use(express.json());
 
-const pool = createPool({
-  connectionString: process.env.POSTGRES_URL || process.env.DATABASE_URL,
-});
-
-async function ensureTables() {
-  console.log('Ensuring database tables exist...');
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS doctors (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        gender TEXT NOT NULL,
-        "previousWards" TEXT NOT NULL
-      )
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS wards (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        requirements TEXT NOT NULL
-      )
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS assignments (
-        id TEXT PRIMARY KEY,
-        date TEXT NOT NULL,
-        "wardId" TEXT NOT NULL,
-        "doctorIds" TEXT NOT NULL
-      )
-    `);
-    console.log('Database tables ready.');
-  } catch (err) {
-    console.error('Error creating database tables:', err.message);
-    throw err;
-  }
-}
-
-// Ensure tables exist on every cold start (cached after first call)
-let tablesReady = null;
-async function getTablesReady() {
-  if (!tablesReady) {
-    tablesReady = ensureTables().catch(err => {
-      tablesReady = null; // Reset so we can retry on next request
-      throw err;
-    });
-  }
-  return tablesReady;
-}
-
-// Debug endpoint to check DB status
-app.get('/api/debug-db', async (req, res) => {
-  try {
-    await getTablesReady();
-    const { rows } = await pool.query('SELECT NOW() as now');
-    res.json({ status: 'connected', time: rows[0].now, env: { 
-      has_postgres_url: !!process.env.POSTGRES_URL,
-      has_database_url: !!process.env.DATABASE_URL 
-    }});
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
+const prisma = new PrismaClient();
 
 // --- Doctors ---
 app.get('/api/doctors', async (req, res) => {
   try {
-    await getTablesReady();
-    const { rows } = await pool.query('SELECT * FROM doctors');
-    res.json(rows.map(r => ({ ...r, previousWards: JSON.parse(r.previousWards) })));
+    const doctors = await prisma.doctor.findMany({
+      orderBy: { name: 'asc' }
+    });
+    res.json(doctors);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -80,13 +20,24 @@ app.get('/api/doctors', async (req, res) => {
 
 app.post('/api/doctors', async (req, res) => {
   try {
-    await getTablesReady();
     const { id, name, gender, previousWards } = req.body;
-    await pool.query(
-      'INSERT INTO doctors (id, name, gender, "previousWards") VALUES ($1, $2, $3, $4)',
-      [id, name, gender, JSON.stringify(previousWards)]
-    );
+    await prisma.doctor.create({
+      data: { id, name, gender, previousWards }
+    });
     res.status(201).json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/doctors/:id', async (req, res) => {
+  try {
+    const { name, gender, previousWards } = req.body;
+    await prisma.doctor.update({
+      where: { id: req.params.id },
+      data: { name, gender, previousWards }
+    });
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -94,8 +45,9 @@ app.post('/api/doctors', async (req, res) => {
 
 app.delete('/api/doctors/:id', async (req, res) => {
   try {
-    await getTablesReady();
-    await pool.query('DELETE FROM doctors WHERE id = $1', [req.params.id]);
+    await prisma.doctor.delete({
+      where: { id: req.params.id }
+    });
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -105,9 +57,8 @@ app.delete('/api/doctors/:id', async (req, res) => {
 // --- Wards ---
 app.get('/api/wards', async (req, res) => {
   try {
-    await getTablesReady();
-    const { rows } = await pool.query('SELECT * FROM wards');
-    res.json(rows.map(r => ({ ...r, requirements: JSON.parse(r.requirements) })));
+    const wards = await prisma.ward.findMany();
+    res.json(wards);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -115,13 +66,24 @@ app.get('/api/wards', async (req, res) => {
 
 app.post('/api/wards', async (req, res) => {
   try {
-    await getTablesReady();
     const { id, name, requirements } = req.body;
-    await pool.query(
-      'INSERT INTO wards (id, name, requirements) VALUES ($1, $2, $3)',
-      [id, name, JSON.stringify(requirements)]
-    );
+    await prisma.ward.create({
+      data: { id, name, requirements }
+    });
     res.status(201).json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/wards/:id', async (req, res) => {
+  try {
+    const { name, requirements } = req.body;
+    await prisma.ward.update({
+      where: { id: req.params.id },
+      data: { name, requirements }
+    });
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -129,8 +91,9 @@ app.post('/api/wards', async (req, res) => {
 
 app.delete('/api/wards/:id', async (req, res) => {
   try {
-    await getTablesReady();
-    await pool.query('DELETE FROM wards WHERE id = $1', [req.params.id]);
+    await prisma.ward.delete({
+      where: { id: req.params.id }
+    });
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -140,9 +103,8 @@ app.delete('/api/wards/:id', async (req, res) => {
 // --- Assignments ---
 app.get('/api/assignments', async (req, res) => {
   try {
-    await getTablesReady();
-    const { rows } = await pool.query('SELECT * FROM assignments');
-    res.json(rows.map(r => ({ ...r, doctorIds: JSON.parse(r.doctorIds) })));
+    const assignments = await prisma.assignment.findMany();
+    res.json(assignments);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -150,18 +112,13 @@ app.get('/api/assignments', async (req, res) => {
 
 app.post('/api/assignments', async (req, res) => {
   try {
-    await getTablesReady();
     const assignments = Array.isArray(req.body) ? req.body : [req.body];
     for (const a of assignments) {
-      await pool.query(
-        `INSERT INTO assignments (id, date, "wardId", "doctorIds")
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (id) DO UPDATE SET
-           date = EXCLUDED.date,
-           "wardId" = EXCLUDED."wardId",
-           "doctorIds" = EXCLUDED."doctorIds"`,
-        [a.id, a.date, a.wardId, JSON.stringify(a.doctorIds)]
-      );
+      await prisma.assignment.upsert({
+        where: { id: a.id },
+        update: { date: a.date, wardId: a.wardId, doctorIds: a.doctorIds },
+        create: { id: a.id, date: a.date, wardId: a.wardId, doctorIds: a.doctorIds }
+      });
     }
     res.status(201).json({ success: true });
   } catch (e) {
@@ -171,8 +128,7 @@ app.post('/api/assignments', async (req, res) => {
 
 app.delete('/api/assignments', async (req, res) => {
   try {
-    await getTablesReady();
-    await pool.query('DELETE FROM assignments');
+    await prisma.assignment.deleteMany();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -182,19 +138,14 @@ app.delete('/api/assignments', async (req, res) => {
 // --- Bulk Import ---
 app.post('/api/import', async (req, res) => {
   try {
-    await getTablesReady();
     const { doctors } = req.body;
     if (doctors) {
       for (const d of doctors) {
-        await pool.query(
-          `INSERT INTO doctors (id, name, gender, "previousWards")
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (id) DO UPDATE SET
-             name = EXCLUDED.name,
-             gender = EXCLUDED.gender,
-             "previousWards" = EXCLUDED."previousWards"`,
-          [d.id, d.name, d.gender, JSON.stringify(d.previousWards)]
-        );
+        await prisma.doctor.upsert({
+          where: { id: d.id },
+          update: { name: d.name, gender: d.gender, previousWards: d.previousWards },
+          create: { id: d.id, name: d.name, gender: d.gender, previousWards: d.previousWards }
+        });
       }
     }
     res.json({ success: true });
@@ -203,32 +154,13 @@ app.post('/api/import', async (req, res) => {
   }
 });
 
-// --- Update Routes ---
-app.put('/api/doctors/:id', async (req, res) => {
+// --- Debug ---
+app.get('/api/debug-db', async (req, res) => {
   try {
-    await getTablesReady();
-    const { name, gender, previousWards } = req.body;
-    await pool.query(
-      'UPDATE doctors SET name = $1, gender = $2, "previousWards" = $3 WHERE id = $4',
-      [name, gender, JSON.stringify(previousWards), req.params.id]
-    );
-    res.json({ success: true });
+    await prisma.$connect();
+    res.json({ status: 'connected', orm: 'prisma' });
   } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.put('/api/wards/:id', async (req, res) => {
-  try {
-    await getTablesReady();
-    const { name, requirements } = req.body;
-    await pool.query(
-      'UPDATE wards SET name = $1, requirements = $2 WHERE id = $3',
-      [name, JSON.stringify(requirements), req.params.id]
-    );
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ status: 'error', message: e.message });
   }
 });
 
