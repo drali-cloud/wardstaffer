@@ -46,12 +46,17 @@ export function useStaffingData() {
 
   const addDoctor = useCallback(async (doctor: Doctor) => {
     try {
-        await fetch('/api/doctors', {
+        const resp = await fetch('/api/doctors', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(doctor)
         });
-        setData(prev => ({ ...prev, doctors: [...prev.doctors, doctor] }));
+        if (resp.ok) {
+          setData(prev => ({ ...prev, doctors: [...prev.doctors, doctor] }));
+        } else {
+          const err = await resp.json();
+          alert('Failed to save doctor: ' + (err.error || 'Unknown error'));
+        }
     } catch (e) {
         console.error('Failed to add doctor', e);
     }
@@ -59,8 +64,10 @@ export function useStaffingData() {
 
   const deleteDoctor = useCallback(async (id: string) => {
     try {
-        await fetch(`/api/doctors/${id}`, { method: 'DELETE' });
-        setData(prev => ({ ...prev, doctors: prev.doctors.filter(d => d.id !== id) }));
+        const resp = await fetch(`/api/doctors/${id}`, { method: 'DELETE' });
+        if (resp.ok) {
+          setData(prev => ({ ...prev, doctors: prev.doctors.filter(d => d.id !== id) }));
+        }
     } catch (e) {
         console.error('Failed to delete doctor', e);
     }
@@ -68,12 +75,17 @@ export function useStaffingData() {
 
   const addWard = useCallback(async (ward: Ward) => {
     try {
-        await fetch('/api/wards', {
+        const resp = await fetch('/api/wards', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(ward)
         });
-        setData(prev => ({ ...prev, wards: [...prev.wards, ward] }));
+        if (resp.ok) {
+          setData(prev => ({ ...prev, wards: [...prev.wards, ward] }));
+        } else {
+          const err = await resp.json();
+          alert('Failed to save ward: ' + (err.error || 'Unknown error'));
+        }
     } catch (e) {
         console.error('Failed to add ward', e);
     }
