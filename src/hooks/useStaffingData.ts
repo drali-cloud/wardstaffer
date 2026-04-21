@@ -169,6 +169,16 @@ export function useStaffingData() {
     } finally { setSyncing(false); }
   }, [data]);
 
+  const calculateTotalHours = useCallback((doctorId: string, period?: string) => {
+    return data.shifts
+        .filter(s => s.doctorId === doctorId && (!period || s.period === period))
+        .reduce((total, s) => {
+            if (s.wardId === 'er-referral') return total + 24;
+            if (s.wardId.startsWith('er-')) return total + 12;
+            return total + 24; // Ward shifts are 24h
+        }, 0);
+  }, [data.shifts]);
+
   const calculateDailyRoster = useCallback(async (period: string) => {
       setSyncing(true);
       try {
@@ -420,5 +430,5 @@ export function useStaffingData() {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
   }, [executeAction]);
 
-  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap };
+  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap, calculateTotalHours };
 }

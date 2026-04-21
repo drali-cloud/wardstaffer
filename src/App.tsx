@@ -315,9 +315,9 @@ function ERCallsView({ staffing, user }: { staffing: any, user: User }) {
 
             <AnimatePresence>
                 {selectedDay && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 bg-slate-950/60 backdrop-blur-sm">
-                        <div className="bg-white w-full max-w-4xl h-[90vh] md:h-auto rounded-t-[32px] md:rounded-[32px] shadow-2xl overflow-hidden border border-slate-200 flex flex-col">
-                            <div className="bg-slate-900 p-5 md:p-6 flex justify-between items-center text-white flex-shrink-0">
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-slate-950/70 backdrop-blur-md">
+                        <div className="bg-white w-full max-w-5xl max-h-[95vh] rounded-[24px] md:rounded-[32px] shadow-2xl overflow-hidden border border-white/20 flex flex-col relative">
+                            <div className="bg-slate-900 p-4 md:p-6 flex justify-between items-center text-white flex-shrink-0 border-b border-slate-800">
                                 <div className="flex items-center gap-4"><div className="w-10 h-10 md:w-12 md:h-12 bg-blue-600 rounded-2xl flex items-center justify-center font-bold text-base md:text-lg">{selectedDay}</div><div><h3 className="text-base md:text-lg font-bold">Operational Report</h3><p className="text-[10px] md:text-xs text-slate-400 uppercase font-bold tracking-widest">{period}</p></div></div>
                                 <button onClick={() => setSelectedDay(null)} className="p-2 hover:bg-white/10 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
                             </div>
@@ -480,10 +480,51 @@ const DashboardView = React.memo(({ staffing, user }: { staffing: any, user: Aut
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [targetPeriod, setTargetPeriod] = useState(currentMonth);
   const myAssignment = staffing.assignments.filter((a: any) => a.doctorIds.includes(user.id)).sort((a: any, b: any) => b.period.localeCompare(a.period))[0];
+  const isAdmin = user.role === 'admin';
+
+  const sortedByHours = useMemo(() => {
+    if (!isAdmin) return [];
+    return staffing.doctors.map((d: Doctor) => ({
+        ...d,
+        totalHours: staffing.calculateTotalHours(d.id, targetPeriod)
+    })).sort((a: any, b: any) => b.totalHours - a.totalHours);
+  }, [staffing.doctors, targetPeriod, isAdmin, staffing.calculateTotalHours]);
+
+  const topPerformer = sortedByHours[0];
+  const lowPerformer = sortedByHours[sortedByHours.length - 1];
+
   return (
     <div className="space-y-8">
       <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden"><div className="relative z-10"><h2 className="text-2xl font-bold">Hospital Overview</h2><p className="text-blue-100 mt-2 text-sm max-w-lg">{user.role === 'admin' ? "Full Control Mode." : myAssignment ? `Assigned to ${staffing.wardMap.get(myAssignment.wardId)?.name} for ${myAssignment.period}.` : "No active rotation."}</p></div><Hospital className="absolute right-[-20px] bottom-[-20px] w-64 h-64 text-white/10 rotate-12" /></div>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><StatCard label="Total Staff" value={staffing.doctors.length} icon={<Users className="w-5 h-5 text-blue-600" />} /><StatCard label="Monthly Wards" value={staffing.wards.length} icon={<Hospital className="w-5 h-5 text-blue-600" />} /><StatCard label="Total Rotations" value={staffing.assignments.length} icon={<Archive className="w-5 h-5 text-blue-600" />} /><StatCard label="Archives" value={new Set(staffing.assignments.map(a => a.period)).size} icon={<Calendar className="w-5 h-5 text-blue-600" />} /></div>
+      
+      {isAdmin && sortedByHours.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Activity className="w-24 h-24 text-blue-600" /></div>
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowLeft className="w-4 h-4 text-blue-600 rotate-90" /> Peak Workload</h3>
+                  <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-xl font-bold text-blue-600 border border-blue-100">{topPerformer.name.charAt(0)}</div>
+                      <div>
+                          <p className="text-lg font-bold text-slate-800">{topPerformer.name}</p>
+                          <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded w-fit mt-1">{topPerformer.totalHours} Weighted Hours</p>
+                      </div>
+                  </div>
+              </div>
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Clock className="w-24 h-24 text-green-600" /></div>
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowLeft className="w-4 h-4 text-green-600 -rotate-90" /> Lowest Workload</h3>
+                  <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-green-50 rounded-2xl flex items-center justify-center text-xl font-bold text-green-600 border border-green-100">{lowPerformer.name.charAt(0)}</div>
+                      <div>
+                          <p className="text-lg font-bold text-slate-800">{lowPerformer.name}</p>
+                          <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest bg-green-50 px-2 py-0.5 rounded w-fit mt-1">{lowPerformer.totalHours} Weighted Hours</p>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><StatCard label="Total Staff" value={staffing.doctors.length} icon={<Users className="w-5 h-5 text-blue-600" />} /><StatCard label="Monthly Wards" value={staffing.wards.length} icon={<Hospital className="w-5 h-5 text-blue-600" />} /><StatCard label="Total Rotations" value={staffing.assignments.length} icon={<Archive className="w-5 h-5 text-blue-600" />} /><StatCard label="Archives" value={new Set(staffing.assignments.map((a: any) => a.period)).size} icon={<Calendar className="w-5 h-5 text-blue-600" />} /></div>
       {user.role === 'admin' && (
         <div className="technical-card p-8 border-blue-100 ring-1 ring-blue-50 flex items-center justify-between gap-8">
           <div>
@@ -727,8 +768,63 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staf
             </div>
         );
     }
-    return (<div className="space-y-6"><div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center"><div><h2 className="text-xl font-bold text-slate-800">Rotation Archives</h2><p className="text-xs text-slate-500 mt-1">Manage monthly dispatches and daily shift rosters.</p></div></div><div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">{periods.map(p => (<div key={p} className="technical-card p-6 cursor-pointer hover:border-blue-300 transition-all group relative"><div onClick={() => onSelect(p)}><div className="bg-blue-50 p-2 rounded-lg text-blue-600 w-fit mb-4 group-hover:bg-blue-600 group-hover:text-white transition-colors"><Archive className="w-5 h-5" /></div><h3 className="text-lg font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(p + '-01'))}</h3><div className="mt-4 pt-4 border-t border-slate-100 flex items-center text-[10px] font-bold text-blue-600 uppercase tracking-widest"><span>Access Roster</span><ChevronRight className="w-3 h-3" /></div></div>{user.role === 'admin' && (<button onClick={(e) => { e.stopPropagation(); if(confirm(`Purge all records for ${p}?`)) staffing.deleteDispatchByPeriod(p); }} className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="w-4 h-4" /></button>)}</div>))}</div></div>);
-};
+
+    return (
+        <div className="space-y-6">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                    <button onClick={() => onSelect(null)} className="p-2 hover:bg-slate-50 rounded-xl border border-slate-200"><ChevronLeft className="w-5 h-5" /></button>
+                    <div><h2 className="text-xl font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(selectedPeriod + '-01'))}</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Archived Operational Data</p></div>
+                </div>
+                {isAdmin && (
+                    <div className="flex flex-wrap gap-2">
+                        <button onClick={() => handleExportExcel('ward')} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-all"><Download className="w-3.5 h-3.5" /> Ward Excel</button>
+                        <button onClick={() => handleExportExcel('er')} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2 rounded-xl hover:bg-amber-700 transition-all"><Download className="w-3.5 h-3.5" /> ER Excel</button>
+                        <button onClick={() => { if(confirm('Permanently delete ALL ER CALLS for this period?')) staffing.clearRosterByPeriod(selectedPeriod, true); }} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl hover:bg-red-100 transition-all"><Trash2 className="w-3.5 h-3.5" /> Delete ER</button>
+                    </div>
+                )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2"><ClipboardList className="w-4 h-4 text-blue-600" /><h3 className="text-xs font-bold uppercase tracking-widest">Ward Shift Log</h3></div>
+                    <div className="max-h-[500px] overflow-y-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-white sticky top-0 z-10"><tr className="text-[10px] uppercase text-slate-400 font-bold border-b border-slate-100"><th className="p-4">Day</th><th className="p-4">Ward</th><th className="p-4">Personnel</th></tr></thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {wardShifts.sort((a,b)=>a.day-b.day).map((s: ShiftRecord) => (
+                                    <tr key={s.id} className="hover:bg-slate-50 transition-colors text-[11px] font-medium">
+                                        <td className="p-4 font-bold text-slate-400">{s.day}</td>
+                                        <td className="p-4 text-blue-600">{staffing.wardMap.get(s.wardId)?.name}</td>
+                                        <td className="p-4 text-slate-800 font-bold">{staffing.doctorMap.get(s.doctorId)?.name}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2"><Activity className="w-4 h-4 text-amber-600" /><h3 className="text-xs font-bold uppercase tracking-widest">ER Call Log</h3></div>
+                    <div className="max-h-[500px] overflow-y-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-white sticky top-0 z-10"><tr className="text-[10px] uppercase text-slate-400 font-bold border-b border-slate-100"><th className="p-4">Day</th><th className="p-4">Dept</th><th className="p-4">Personnel</th></tr></thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {erShifts.sort((a,b)=>a.day-b.day).map((s: ShiftRecord) => (
+                                    <tr key={s.id} className="hover:bg-slate-50 transition-colors text-[11px] font-medium">
+                                        <td className="p-4 font-bold text-slate-400">{s.day}</td>
+                                        <td className="p-4 text-amber-600">{s.wardId === 'er-referral' ? 'REFERRAL' : s.wardId.replace('er-', '').toUpperCase()}</td>
+                                        <td className="p-4 text-slate-800 font-bold">{staffing.doctorMap.get(s.doctorId)?.name}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 const AssignmentsView = React.memo(({ staffing }: { staffing: any }) => {
     return (<div className="space-y-6"><div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><h2 className="text-xl font-bold text-slate-800">Dispatch History</h2></div><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">Period</th><th className="col-header">Ward</th><th className="col-header">Personnel Pool</th></tr></thead><tbody className="text-sm divide-y divide-slate-100">{staffing.assignments.slice().reverse().map((a: Assignment) => (<tr key={a.id}><td className="px-6 py-4 text-[10px] font-mono text-blue-600 font-bold uppercase">{a.period}</td><td className="px-6 py-4 font-semibold text-slate-800">{staffing.wardMap.get(a.wardId)?.name}</td><td className="px-6 py-4"><div className="flex flex-wrap gap-1.5 font-mono text-[9px]">{a.doctorIds.map(id => (<span key={id} className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-bold uppercase">{staffing.doctorMap.get(id)?.name}</span>))}</div></td></tr>))}</tbody></table></div></div>);
