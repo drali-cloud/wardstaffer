@@ -76,7 +76,7 @@ export default function App() {
                 id: Math.random().toString(36).substr(2, 9),
                 name: d.name || d.Name || "Unnamed Doctor",
                 gender: (d.gender || d.Gender || "Other") as Gender,
-                previousWards: d.pw || d.PreviousWards ? (d.pw || d.PreviousWards).toString().split(',').map((s: string) => s.trim()) : []
+                previousWards: (d.pw || d.PreviousWards) ? (d.pw || d.PreviousWards).toString().split(',').map((s: string) => s.trim()) : []
             }));
             staffing.importData({ doctors: importedDoctors });
         }
@@ -288,6 +288,7 @@ function DashboardView({ staffing }: { staffing: any }) {
 }
 
 function DoctorsView({ staffing }: { staffing: any }) {
+  const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newDoctor, setNewDoctor] = useState<Partial<Doctor>>({ name: '', gender: 'Male', previousWards: [] });
 
@@ -430,6 +431,7 @@ function DoctorsView({ staffing }: { staffing: any }) {
 }
 
 function WardsView({ staffing }: { staffing: any }) {
+    const [showAdd, setShowAdd] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [newWard, setNewWard] = useState<Partial<Ward>>({ 
         name: '', 
