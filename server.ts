@@ -1,31 +1,31 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import pg from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import 'dotenv/config';
 
+const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   app.use(express.json());
 
-  // Initialize SQLite
-  const db = await open({
-    filename: './database.sqlite',
-    driver: sqlite3.Database
+  // Initialize Postgres
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/wardstaffer'
   });
 
   // Create tables
-  await db.exec(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS doctors (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       gender TEXT NOT NULL,
-      previousWards TEXT NOT NULL -- JSON stringified array
+      "previousWards" TEXT NOT NULL -- JSON stringified array
     );
 
     CREATE TABLE IF NOT EXISTS wards (
@@ -37,8 +37,8 @@ async function startServer() {
     CREATE TABLE IF NOT EXISTS assignments (
       id TEXT PRIMARY KEY,
       date TEXT NOT NULL,
-      wardId TEXT NOT NULL,
-      doctorIds TEXT NOT NULL -- JSON stringified array
+      "wardId" TEXT NOT NULL,
+      "doctorIds" TEXT NOT NULL -- JSON stringified array
     );
   `);
 
@@ -46,49 +46,49 @@ async function startServer() {
 
   // Doctors
   app.get('/api/doctors', async (req, res) => {
-    const rows = await db.all('SELECT * FROM doctors');
+    const { rows } = await pool.query('SELECT * FROM doctors');
     const doctors = rows.map(r => ({ ...r, previousWards: JSON.parse(r.previousWards) }));
     res.json(doctors);
   });
 
   app.post('/api/doctors', async (req, res) => {
     const { id, name, gender, previousWards } = req.body;
-    await db.run(
-      'INSERT INTO doctors (id, name, gender, previousWards) VALUES (?, ?, ?, ?)',
+    await pool.query(
+      'INSERT INTO doctors (id, name, gender, "previousWards") VALUES ($1, $2, $3, $4)',
       [id, name, gender, JSON.stringify(previousWards)]
     );
     res.status(201).json({ success: true });
   });
 
   app.delete('/api/doctors/:id', async (req, res) => {
-    await db.run('DELETE FROM doctors WHERE id = ?', [req.params.id]);
+    await pool.query('DELETE FROM doctors WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   });
 
   // Wards
   app.get('/api/wards', async (req, res) => {
-    const rows = await db.all('SELECT * FROM wards');
+    const { rows } = await pool.query('SELECT * FROM wards');
     const wards = rows.map(r => ({ ...r, requirements: JSON.parse(r.requirements) }));
     res.json(wards);
   });
 
   app.post('/api/wards', async (req, res) => {
     const { id, name, requirements } = req.body;
-    await db.run(
-      'INSERT INTO wards (id, name, requirements) VALUES (?, ?, ?)',
+    await pool.query(
+      'INSERT INTO wards (id, name, requirements) VALUES ($1, $2, $3)',
       [id, name, JSON.stringify(requirements)]
     );
     res.status(201).json({ success: true });
   });
 
   app.delete('/api/wards/:id', async (req, res) => {
-    await db.run('DELETE FROM wards WHERE id = ?', [req.params.id]);
+    await pool.query('DELETE FROM wards WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   });
 
   // Assignments
   app.get('/api/assignments', async (req, res) => {
-    const rows = await db.all('SELECT * FROM assignments');
+    const { rows } = await pool.query('SELECT * FROM assignments');
     const assignments = rows.map(r => ({ ...r, doctorIds: JSON.parse(r.doctorIds) }));
     res.json(assignments);
   });
@@ -96,8 +96,8 @@ async function startServer() {
   app.post('/api/assignments', async (req, res) => {
     const assignments = Array.isArray(req.body) ? req.body : [req.body];
     for (const a of assignments) {
-      await db.run(
-        'REPLACE INTO assignments (id, date, wardId, doctorIds) VALUES (?, ?, ?, ?)',
+      await pool.query(
+        'INSERT INTO assignments (id, date, "wardId", "doctorIds") VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET date = EXCLUDED.date, "wardId" = EXCLUDED."wardId", "doctorIds" = EXCLUDED."doctorIds"',
         [a.id, a.date, a.wardId, JSON.stringify(a.doctorIds)]
       );
     }
@@ -105,7 +105,7 @@ async function startServer() {
   });
 
   app.delete('/api/assignments', async (req, res) => {
-    await db.run('DELETE FROM assignments');
+    await pool.query('DELETE FROM assignments');
     res.json({ success: true });
   });
 
@@ -115,8 +115,10 @@ async function startServer() {
       
       if (doctors) {
           for (const d of doctors) {
-              await db.run('REPLACE INTO doctors (id, name, gender, previousWards) VALUES (?, ?, ?, ?)', 
-                  [d.id, d.name, d.gender, JSON.stringify(d.previousWards)]);
+              await pool.query(
+                  'INSERT INTO doctors (id, name, gender, "previousWards") VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, gender = EXCLUDED.gender, "previousWards" = EXCLUDED."previousWards"', 
+                  [d.id, d.name, d.gender, JSON.stringify(d.previousWards)]
+              );
           }
       }
       res.json({ success: true });
