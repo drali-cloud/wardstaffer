@@ -22,6 +22,7 @@ export interface Ward {
   name: string;
   requirements: WardRequirements;
   parentWardId?: string;
+  hiddenFromCalendar?: boolean;
 }
 
 export interface ShiftRecord {

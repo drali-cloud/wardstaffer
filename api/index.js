@@ -46,6 +46,7 @@ async function ensureTables() {
   try { await sql(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE wards ADD COLUMN IF NOT EXISTS "parentWardId" TEXT`); } catch(e){}
+  try { await sql(`ALTER TABLE wards ADD COLUMN IF NOT EXISTS "hiddenFromCalendar" BOOLEAN`); } catch(e){}
   try { await sql(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); } catch(e){}
   // Clean up legacy columns that might cause NOT NULL violations
   try { await sql(`ALTER TABLE assignments ALTER COLUMN "date" DROP NOT NULL`); } catch(e){}
@@ -88,13 +89,14 @@ async function upsertDoctor(d) {
 async function upsertWard(w) {
     const sql = getSql();
     await sql(`
-        INSERT INTO wards (id, name, requirements, "parentWardId") 
-        VALUES ($1, $2, $3, $4) 
+        INSERT INTO wards (id, name, requirements, "parentWardId", "hiddenFromCalendar") 
+        VALUES ($1, $2, $3, $4, $5) 
         ON CONFLICT (id) DO UPDATE SET 
             name = EXCLUDED.name, 
             requirements = EXCLUDED.requirements,
-            "parentWardId" = EXCLUDED."parentWardId"
-    `, [w.id, w.name, JSON.stringify(w.requirements), w.parentWardId || null]);
+            "parentWardId" = EXCLUDED."parentWardId",
+            "hiddenFromCalendar" = EXCLUDED."hiddenFromCalendar"
+    `, [w.id, w.name, JSON.stringify(w.requirements), w.parentWardId || null, w.hiddenFromCalendar ? true : false]);
 }
 
 async function upsertAssignment(a) {
@@ -241,27 +243,27 @@ app.get('/api/wards', async (req, res) => {
 
 app.post('/api/wards', async (req, res) => {
   await getTablesReady();
-  const { id, name, requirements, parentWardId } = req.body;
+  const { id, name, requirements, parentWardId, hiddenFromCalendar } = req.body;
   if (isUsingMock) {
-    mockDb.wards.push({ id, name, requirements, parentWardId });
+    mockDb.wards.push({ id, name, requirements, parentWardId, hiddenFromCalendar });
     return res.json({ success: true });
   }
   try {
-    await upsertWard({ id, name, requirements, parentWardId });
+    await upsertWard({ id, name, requirements, parentWardId, hiddenFromCalendar });
     res.status(201).json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/api/wards/:id', async (req, res) => {
   await getTablesReady();
-  const { name, requirements, parentWardId } = req.body;
+  const { name, requirements, parentWardId, hiddenFromCalendar } = req.body;
   if (isUsingMock) {
     const idx = mockDb.wards.findIndex(w => w.id === req.params.id);
-    if (idx > -1) mockDb.wards[idx] = { id: req.params.id, name, requirements, parentWardId };
+    if (idx > -1) mockDb.wards[idx] = { id: req.params.id, name, requirements, parentWardId, hiddenFromCalendar };
     return res.json({ success: true });
   }
   try {
-    await upsertWard({ id: req.params.id, name, requirements, parentWardId });
+    await upsertWard({ id: req.params.id, name, requirements, parentWardId, hiddenFromCalendar });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

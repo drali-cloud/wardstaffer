@@ -214,20 +214,18 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                         <div className="flex gap-2"><button onClick={prevMonth} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={nextMonth} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div>
                     </div>
 
-                    <div className="technical-card p-6 border-blue-100 ring-1 ring-blue-50 flex items-center justify-between gap-8">
-                        <div>
-                            <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-600" /> Roster Operations</h2>
-                            <p className="text-xs text-slate-400">Calculate or export the daily shift schedule for this period.</p>
-                        </div>
-                        <div className="flex gap-4">
-                            <button onClick={() => staffing.calculateDailyRoster(period)} className="btn-primary px-8 flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Calculate Shifts</button>
-                            <button onClick={() => { if(confirm('Clear all shifts for this month? Personnel assignments will be kept.')) staffing.clearRosterByPeriod(period); }} className="bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Trash2 className="w-4 h-4" /> Clear Roster</button>
-                            <button onClick={handleExportRoster} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Download className="w-4 h-4" /> Export Roster</button>
-                        </div>
-                    </div>
-                </>
-            )}
-            
+            <div className="technical-card p-6 border-blue-100 ring-1 ring-blue-50 flex items-center justify-between gap-8">
+                <div>
+                    <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-600" /> Roster Operations</h2>
+                    <p className="text-xs text-slate-400">Calculate or export the daily shift schedule for this period.</p>
+                </div>
+                <div className="flex gap-4">
+                    <button onClick={() => staffing.calculateDailyRoster(period)} className="btn-primary px-8 flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Calculate Shifts</button>
+                    <button onClick={() => { if(confirm('Clear all shifts for this month? Personnel assignments will be kept.')) staffing.clearRosterByPeriod(period); }} className="bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Trash2 className="w-4 h-4" /> Clear Roster</button>
+                    <button onClick={handleExportRoster} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Download className="w-4 h-4" /> Export Roster</button>
+                </div>
+            </div>
+
             <div className="grid grid-cols-7 gap-px bg-slate-200 rounded-2xl overflow-hidden border border-slate-200 shadow-xl">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (<div key={d} className="bg-slate-50 p-3 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">{d}</div>))}
                 {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`empty-${i}`} className="bg-slate-50/50 min-h-[70px]" />)}
@@ -265,7 +263,11 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                                 <button onClick={() => setSelectedDay(null)} className="p-2 hover:bg-white/10 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
                             </div>
                             <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
-                                {staffing.wards.map((w: Ward) => {
+                                {staffing.wards.filter((w: Ward) => {
+                                    if (w.hiddenFromCalendar) return false;
+                                    if (w.parentWardId && staffing.wardMap.get(w.parentWardId)?.hiddenFromCalendar) return false;
+                                    return true;
+                                }).map((w: Ward) => {
                                     const dayShifts = periodShifts.filter((s: ShiftRecord) => s.day === selectedDay && s.wardId === w.id);
                                     return (
                                         <div key={w.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group hover:border-blue-200 transition-all">
@@ -787,6 +789,7 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
             id: editingId || `ward-${Math.random().toString(36).substr(2, 5)}`, 
             name: newWard.name.trim(), 
             parentWardId: newWard.parentWardId,
+            hiddenFromCalendar: newWard.hiddenFromCalendar || false,
             requirements: { 
                 totalDoctors: Number(newWard.requirements?.totalDoctors || 2), 
                 genderDiversity: newWard.requirements?.genderDiversity || 'None', 
@@ -797,7 +800,7 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
             } 
         }; 
         if (editingId) staffing.updateWard(payload); else staffing.addWard(payload); 
-        setShowAdd(false); setEditingId(null); setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' } }); 
+        setShowAdd(false); setEditingId(null); setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' }, hiddenFromCalendar: false }); 
     };
 
     const handleDrop = (wardId: string) => {
@@ -851,6 +854,10 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
               <div><label className="text-[10px] uppercase font-bold text-slate-400">Hierarchy</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.parentWardId || ''} onChange={e => setNewWard(prev => ({ ...prev, parentWardId: e.target.value || undefined }))}><option value="">Main Unit (Stand-alone)</option>{staffing.wards.filter((w: Ward) => w.id !== editingId).map((w: Ward) => (<option key={w.id} value={w.id}>Subordinate to {w.name}</option>))}</select></div>
               <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1|2 } }))}><option value={1}>1 Physician Per Shift</option><option value={2}>2 Physicians Per Shift</option></select></div>
               <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div>
+              <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 mt-auto h-[42px]">
+                <input type="checkbox" id="hideWardAdd" className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" checked={newWard.hiddenFromCalendar || false} onChange={e => setNewWard(prev => ({ ...prev, hiddenFromCalendar: e.target.checked }))} />
+                <label htmlFor="hideWardAdd" className="text-[10px] uppercase font-bold text-slate-600 cursor-pointer">Hide from Calendar</label>
+              </div>
             </div>
             <div className="flex gap-3 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save Unit</button></div>
           </div>
@@ -884,6 +891,10 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
                         <div><label className="text-[10px] uppercase font-bold text-slate-400">Hierarchy</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.parentWardId || ''} onChange={e => setNewWard(prev => ({ ...prev, parentWardId: e.target.value || undefined }))}><option value="">Main Unit (Stand-alone)</option>{staffing.wards.filter((sw: Ward) => sw.id !== editingId).map((sw: Ward) => (<option key={sw.id} value={sw.id}>Subordinate to {sw.name}</option>))}</select></div>
                         <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1|2 } }))}><option value={1}>1 Physician Per Shift</option><option value={2}>2 Physicians Per Shift</option></select></div>
                         <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div>
+                        <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200 shadow-sm mt-auto h-[42px]">
+                          <input type="checkbox" id={`hideWard-${w.id}`} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" checked={newWard.hiddenFromCalendar || false} onChange={e => setNewWard(prev => ({ ...prev, hiddenFromCalendar: e.target.checked }))} />
+                          <label htmlFor={`hideWard-${w.id}`} className="text-[10px] uppercase font-bold text-slate-600 cursor-pointer">Hide from Calendar</label>
+                        </div>
                       </div>
                       <div className="flex gap-3 pt-6 border-t border-blue-100/50">
                         <button className="btn-primary px-8" onClick={handleAdd}>Save Changes</button>
