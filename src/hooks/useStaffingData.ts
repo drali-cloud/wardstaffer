@@ -178,9 +178,14 @@ export function useStaffingData() {
         .reduce((total, s) => {
             if (s.wardId === 'er-referral') return total + 24;
             if (s.wardId.startsWith('er-')) return total + 12;
-            return total + 24; // Ward shifts are 24h
+            // Use ward's actual configured shift duration (ICU/CCU may be 12h, not 24h)
+            const ward = data.wards.find(w => w.id === s.wardId);
+            const duration = ward?.requirements?.shiftDuration;
+            if (duration === '6h') return total + 6;
+            if (duration === '12h') return total + 12;
+            return total + 24; // Default to 24h for unlisted or '24h' wards
         }, 0);
-  }, [data.shifts]);
+  }, [data.shifts, data.wards]);
 
   const calculateDailyRoster = useCallback(async (period: string) => {
       setSyncing(true);
