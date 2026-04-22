@@ -216,8 +216,9 @@ export function useStaffingData() {
               const shiftsPerDay = shiftDuration === '6h' ? 4 : shiftDuration === '12h' ? 2 : 1;
               const totalDailySlots = shiftsPerDay * staffPerShift;
 
-              // GLOBAL CIRCULAR QUEUE: Ensures every doctor works once before anyone repeats
-              let poolQueue = [...combinedDoctorPool].sort(() => Math.random() - 0.5);
+              // Track shift counts to ensure absolute equality within the month
+              const shiftCounts: Record<string, number> = {};
+              combinedDoctorPool.forEach(id => shiftCounts[id] = 0);
               let lastDayAssigned = new Set<string>();
 
               for (let day = 1; day <= daysInMonth; day++) {
@@ -225,24 +226,24 @@ export function useStaffingData() {
                   for (let slot = 0; slot < totalDailySlots; slot++) {
                       // SELECTION CRITERIA:
                       // 1. Must not have worked earlier today
-                      // 2. Must not have worked yesterday (Rest Period Guard)
-                      // 3. Must be the next in line in the global fairness queue
+                      // 2. Must not have worked yesterday (12h-24h Rest Period Guard)
+                      // 3. Must be the person with the LEAST shifts assigned so far this month
                       
-                      let eligible = poolQueue.filter(id => !todayAssigned.has(id) && !lastDayAssigned.has(id));
+                      let eligible = combinedDoctorPool.filter(id => !todayAssigned.has(id) && !lastDayAssigned.has(id));
                       
-                      // EMERGENCY FALLBACK: If rest period is impossible (pool too small), avoid same-day double shifts
+                      // EMERGENCY FALLBACK: If pool is too small for rest rules, just avoid same-day double shifts
                       if (eligible.length === 0) {
-                          eligible = poolQueue.filter(id => !todayAssigned.has(id));
+                          eligible = combinedDoctorPool.filter(id => !todayAssigned.has(id));
                       }
                       
-                      // CRITICAL FALLBACK: If everyone is already working today, pick from the queue
-                      if (eligible.length === 0) eligible = poolQueue;
+                      // CRITICAL FALLBACK: If everyone is already working today, allow anyone
+                      if (eligible.length === 0) eligible = combinedDoctorPool;
 
-                      // Always pick the highest person in the queue who is eligible
-                      const dId = eligible[0];
+                      // SORT BY LEAST SHIFTS: Pick the person with the lowest count to maintain perfect equality
+                      eligible.sort((a, b) => shiftCounts[a] - shiftCounts[b]);
                       
-                      // Move to the very back of the circular queue
-                      poolQueue = [...poolQueue.filter(id => id !== dId), dId];
+                      const dId = eligible[0];
+                      shiftCounts[dId]++;
                       
                       todayAssigned.add(dId);
                       newShifts.push({ 
@@ -548,111 +549,121 @@ export function useStaffingData() {
     setSyncing(true);
     try {
         let currentShifts = [...data.shifts];
-        const periodAssignments = data.assignments.filter(a => a.period === period);
+        const SLOT_START = [8, 14, 20, 26]; 
+        const SLOT_END   = [14, 20, 26, 32];
 
-        // Slot clock boundaries (hours from midnight, spanning into next calendar day)
-        const SLOT_START = [8, 14, 20, 26];  // 26 = 02:00 next day
-        const SLOT_END   = [14, 20, 26, 32]; // 32 = 08:00 next day
-
-        // Check whether assigning `shift` to `doctorId` would create a scheduling conflict
         const canTakeShift = (doctorId: string, shift: ShiftRecord, shifts: ShiftRecord[]): boolean => {
             const doctorShifts = shifts.filter(s => s.period === period && s.doctorId === doctorId && s.id !== shift.id);
             const isNightER = (shift.slotIndex ?? 0) >= 2;
             const shiftStart = SLOT_START[shift.slotIndex ?? 0] ?? 8;
 
             for (const s of doctorShifts) {
-                // Absolute same-day conflict
                 if (s.day === shift.day) return false;
-
-                // ER-to-ER cross-day 12h rule (yesterday's ER vs today's slot)
                 if (s.wardId.startsWith('er-') && s.day === shift.day - 1) {
                     const prevEnd = SLOT_END[s.slotIndex ?? 0] ?? 24;
-                    const gap = (shiftStart + 24) - prevEnd;
-                    if (gap < 12) return false;
+                    if ((shiftStart + 24) - prevEnd < 12) return false;
                 }
-
-                // ER-to-ER cross-day 12h rule (today's ER vs tomorrow's slot)
                 if (s.wardId.startsWith('er-') && s.day === shift.day + 1) {
                     const nextStart = SLOT_START[s.slotIndex ?? 0] ?? 8;
                     const shiftEnd = SLOT_END[shift.slotIndex ?? 0] ?? 24;
-                    const gap = (nextStart + 24) - shiftEnd;
-                    if (gap < 12) return false;
+                    if ((nextStart + 24) - shiftEnd < 12) return false;
                 }
-
-                // Ward-to-ER cross-day: morning ER (Slot 0/1) can't follow ward shift same evening
                 if (!s.wardId.startsWith('er-') && s.day === shift.day - 1 && !isNightER) return false;
-
-                // Ward-to-ER cross-day: night ER (Slot 2/3) can't precede ward shift next morning
                 if (!s.wardId.startsWith('er-') && s.day === shift.day + 1 && isNightER) return false;
             }
             return true;
         };
 
         let iterations = 0;
-        const maxIterations = 500;
+        const MAX_ITERATIONS = 1000;
+        let changesMade = true;
 
-        while (iterations < maxIterations) {
-            // Compute hours for all eligible (non-excluded) doctors
-            const stats = data.doctors
+        while (changesMade && iterations < MAX_ITERATIONS) {
+            changesMade = false;
+            iterations++;
+
+            const leaderboard = data.doctors
                 .filter(d => d.id !== 'root')
-                .filter(d => {
-                    const assignment = periodAssignments.find(a => a.doctorIds.includes(d.id));
-                    return !assignment || !excludedWardIds.includes(assignment.wardId);
+                .map(d => {
+                    const assignment = data.assignments.find(a => a.period === period && a.doctorIds.includes(d.id));
+                    return {
+                        id: d.id,
+                        isExcluded: assignment && excludedWardIds.includes(assignment.wardId),
+                        hours: calculateTotalHours(d.id, period, currentShifts)
+                    };
                 })
-                .map(d => ({
-                    id: d.id,
-                    hours: calculateTotalHours(d.id, period, currentShifts)
-                }))
+                .filter(d => !d.isExcluded)
                 .sort((a, b) => b.hours - a.hours);
 
-            if (stats.length < 2) break;
+            if (leaderboard.length < 2) break;
+            const maxDoc = leaderboard[0];
+            const minDoc = leaderboard[leaderboard.length - 1];
+            if (maxDoc.hours - minDoc.hours <= 12) break;
 
-            // Check if any pair still exceeds 12h gap
-            const maxHours = stats[0].hours;
-            const minHours = stats[stats.length - 1].hours;
-            if (maxHours - minHours <= 12) break;
+            let bestMove: { type: 'move' | 'swap', shiftId: string, otherShiftId?: string, toDocId: string } | null = null;
 
-            // Try all pairs (high→low) until we find a movable ER shift
-            let moved = false;
-            outer:
-            for (let hi = 0; hi < stats.length; hi++) {
-                for (let lo = stats.length - 1; lo > hi; lo--) {
-                    const fromDoc = stats[hi];
-                    const toDoc   = stats[lo];
-                    if (fromDoc.hours - toDoc.hours <= 12) continue; // This pair is already balanced
+            // Try the top 5 heavy vs bottom 5 light to find any legal move/swap
+            outer: for (const fromDoc of leaderboard.slice(0, 5)) {
+                for (const toDoc of leaderboard.slice(-5).reverse()) {
+                    if (fromDoc.hours - toDoc.hours <= 12) continue;
 
-                    // Collect ER shifts of the high-hour doctor, largest duration first
-                    const candidates = currentShifts
-                        .filter(s => s.period === period && s.doctorId === fromDoc.id && s.wardId.startsWith('er-'))
-                        .sort((a, b) => {
-                            // Prefer referrals (24h) then other ER (6h) — biggest impact first
-                            const dur = (s: ShiftRecord) => s.wardId === 'er-referral' ? 24 : 6;
-                            return dur(b) - dur(a);
-                        });
+                    const fromShifts = currentShifts.filter(s => s.period === period && s.doctorId === fromDoc.id && s.wardId.startsWith('er-'));
+                    const toShifts = currentShifts.filter(s => s.period === period && s.doctorId === toDoc.id && s.wardId.startsWith('er-'));
 
-                    for (const shift of candidates) {
-                        if (canTakeShift(toDoc.id, shift, currentShifts)) {
-                            currentShifts = currentShifts.map(s => s.id === shift.id ? { ...s, doctorId: toDoc.id } : s);
-                            moved = true;
-                            break outer;
+                    // A. SIMPLE MOVE (Check referrals first for max impact)
+                    for (const s of fromShifts.sort((a,b) => (b.wardId === 'er-referral' ? 24:6) - (a.wardId === 'er-referral' ? 24:6))) {
+                        if (s.wardId === 'er-referral' && data.doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
+                        if (canTakeShift(toDoc.id, s, currentShifts)) {
+                            const dur = s.wardId === 'er-referral' ? 24 : 6;
+                            if (toDoc.hours + dur < fromDoc.hours) {
+                                bestMove = { type: 'move', shiftId: s.id, toDocId: toDoc.id };
+                                break outer;
+                            }
+                        }
+                    }
+
+                    // B. SWAP (Referral for 6h slot)
+                    const fromRefs = fromShifts.filter(s => s.wardId === 'er-referral');
+                    const toSmall = toShifts.filter(s => s.wardId !== 'er-referral');
+                    for (const ref of fromRefs) {
+                        if (data.doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
+                        for (const small of toSmall) {
+                            if (canTakeShift(toDoc.id, ref, currentShifts.filter(x => x.id !== ref.id && x.id !== small.id)) &&
+                                canTakeShift(fromDoc.id, small, currentShifts.filter(x => x.id !== ref.id && x.id !== small.id))) {
+                                if (toDoc.hours + 18 < fromDoc.hours) {
+                                    bestMove = { type: 'swap', shiftId: ref.id, otherShiftId: small.id, toDocId: toDoc.id };
+                                    break outer;
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            if (!moved) break; // Truly stuck — no valid move exists
-            iterations++;
+            if (bestMove) {
+                if (bestMove.type === 'move') {
+                    currentShifts = currentShifts.map(s => s.id === bestMove.shiftId ? { ...s, doctorId: bestMove.toDocId } : s);
+                } else {
+                    const fromDocId = currentShifts.find(s => s.id === bestMove.shiftId)?.doctorId || '';
+                    currentShifts = currentShifts.map(s => {
+                        if (s.id === bestMove.shiftId) return { ...s, doctorId: bestMove.toDocId };
+                        if (s.id === bestMove.otherShiftId) return { ...s, doctorId: fromDocId };
+                        return s;
+                    });
+                }
+                changesMade = true;
+            }
         }
 
-        await fetch('/api/shifts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(currentShifts)
+        await fetch('/api/shifts/batch', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(currentShifts.filter(s => s.period === period)) 
         });
         setData(prev => ({ ...prev, shifts: currentShifts }));
         return true;
     } catch (e) {
-        alert('Auto-balance failed.');
+        console.error('Auto-balance failed:', e);
         return false;
     } finally {
         setSyncing(false);
