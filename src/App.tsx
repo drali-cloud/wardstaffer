@@ -170,16 +170,17 @@ function AvatarPopup({ doctor, onNavigate, colorClass = "bg-blue-100 text-blue-6
     );
 }
 
-const ShiftCalendarView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavigate: (id: string) => void }) => {
-    const [viewDate, setViewDate] = useState(new Date());
+const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: { staffing: any, onNavigate: (id: string) => void, archivePeriod?: string }) => {
+    const [viewDate, setViewDate] = useState(archivePeriod ? new Date(archivePeriod + '-02') : new Date());
     const [selectedDay, setSelectedDay] = useState<number | null>(null);
-    const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
-    const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
-    const firstDayIdx = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
+    const period = archivePeriod || `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
+    const targetDate = archivePeriod ? new Date(archivePeriod + '-02') : viewDate;
+    const daysInMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
+    const firstDayIdx = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1).getDay();
     const periodShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period);
 
-    const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
-    const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
+    const prevMonth = () => { if (!archivePeriod) setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1)); };
+    const nextMonth = () => { if (!archivePeriod) setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1)); };
 
     const handleExportRoster = () => {
         if (periodShifts.length === 0) { alert('Generate roster first.'); return; }
@@ -206,22 +207,26 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate }: { staffing: any,
 
     return (
         <div className="space-y-8">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-                <div className="flex items-center gap-4"><div className="bg-blue-50 p-3 rounded-xl text-blue-600"><Calendar className="w-6 h-6" /></div><div><h2 className="text-xl font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(viewDate)}</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Shift Operations Center</p></div></div>
-                <div className="flex gap-2"><button onClick={prevMonth} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={nextMonth} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div>
-            </div>
+            {!archivePeriod && (
+                <>
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                        <div className="flex items-center gap-4"><div className="bg-blue-50 p-3 rounded-xl text-blue-600"><Calendar className="w-6 h-6" /></div><div><h2 className="text-xl font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(viewDate)}</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Shift Operations Center</p></div></div>
+                        <div className="flex gap-2"><button onClick={prevMonth} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={nextMonth} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div>
+                    </div>
 
-            <div className="technical-card p-6 border-blue-100 ring-1 ring-blue-50 flex items-center justify-between gap-8">
-                <div>
-                    <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-600" /> Roster Operations</h2>
-                    <p className="text-xs text-slate-400">Calculate or export the daily shift schedule for this period.</p>
-                </div>
-                <div className="flex gap-4">
-                    <button onClick={() => staffing.calculateDailyRoster(period)} className="btn-primary px-8 flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Calculate Shifts</button>
-                    <button onClick={() => { if(confirm('Clear all shifts for this month? Personnel assignments will be kept.')) staffing.clearRosterByPeriod(period); }} className="bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Trash2 className="w-4 h-4" /> Clear Roster</button>
-                    <button onClick={handleExportRoster} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Download className="w-4 h-4" /> Export Roster</button>
-                </div>
-            </div>
+                    <div className="technical-card p-6 border-blue-100 ring-1 ring-blue-50 flex items-center justify-between gap-8">
+                        <div>
+                            <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-600" /> Roster Operations</h2>
+                            <p className="text-xs text-slate-400">Calculate or export the daily shift schedule for this period.</p>
+                        </div>
+                        <div className="flex gap-4">
+                            <button onClick={() => staffing.calculateDailyRoster(period)} className="btn-primary px-8 flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Calculate Shifts</button>
+                            <button onClick={() => { if(confirm('Clear all shifts for this month? Personnel assignments will be kept.')) staffing.clearRosterByPeriod(period); }} className="bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Trash2 className="w-4 h-4" /> Clear Roster</button>
+                            <button onClick={handleExportRoster} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Download className="w-4 h-4" /> Export Roster</button>
+                        </div>
+                    </div>
+                </>
+            )}
             
             <div className="grid grid-cols-7 gap-px bg-slate-200 rounded-2xl overflow-hidden border border-slate-200 shadow-xl">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (<div key={d} className="bg-slate-50 p-3 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">{d}</div>))}
@@ -301,15 +306,16 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate }: { staffing: any,
     );
 });
 
-const ERCallsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) => {
-    const [viewDate, setViewDate] = useState(new Date());
+const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void, archivePeriod?: string }) => {
+    const [viewDate, setViewDate] = useState(archivePeriod ? new Date(archivePeriod + '-02') : new Date());
     const [selectedDay, setSelectedDay] = useState<number | null>(null);
     const [dragSourceWard, setDragSourceWard] = useState<string | null>(null);
-    const isAdmin = user.role === 'admin';
+    const isAdmin = !archivePeriod && user.role === 'admin';
 
-    const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
-    const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
-    const firstDayIdx = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
+    const period = archivePeriod || `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
+    const targetDate = archivePeriod ? new Date(archivePeriod + '-02') : viewDate;
+    const daysInMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
+    const firstDayIdx = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1).getDay();
     
     const erShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.wardId.startsWith('er-'));
 
@@ -330,18 +336,20 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate }: { staffing: any,
 
     return (
         <div className="space-y-6 pb-24 px-1">
-            <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-3 md:gap-4">
-                    <div className="bg-amber-50 p-2 md:p-3 rounded-xl text-amber-600"><Activity className="w-5 h-5 md:w-6 md:h-6" /></div>
-                    <div><h2 className="text-lg md:text-xl font-bold text-slate-800 leading-none">ER Call Center</h2><p className="text-[9px] md:text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Operational Duty Control</p></div>
+            {!archivePeriod && (
+                <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 md:gap-4">
+                        <div className="bg-amber-50 p-2 md:p-3 rounded-xl text-amber-600"><Activity className="w-5 h-5 md:w-6 md:h-6" /></div>
+                        <div><h2 className="text-lg md:text-xl font-bold text-slate-800 leading-none">ER Call Center</h2><p className="text-[9px] md:text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Operational Duty Control</p></div>
+                    </div>
+                    <div className="flex items-center justify-between md:justify-end gap-2">
+                        <div className="flex gap-1"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div>
+                        {isAdmin && (
+                            <button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex-1 md:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-3.5 h-3.5" /> Calculate</button>
+                        )}
+                    </div>
                 </div>
-                <div className="flex items-center justify-between md:justify-end gap-2">
-                    <div className="flex gap-1"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div>
-                    {isAdmin && (
-                        <button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex-1 md:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-3.5 h-3.5" /> Calculate</button>
-                    )}
-                </div>
-            </div>
+            )}
 
             {isAdmin && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -681,7 +689,7 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
   );
 });
 
-const DoctorsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUser }) => {
+const DoctorsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) => {
   const [showAdd, setShowAdd] = useState(false); const [editingId, setEditingId] = useState<string | null>(null); const [newDoctor, setNewDoctor] = useState<Partial<Doctor>>({ name: '', gender: 'Male', previousWards: [] });
   const filtered = useMemo(() => staffing.doctors.filter((d: any) => d.id !== 'root'), [staffing.doctors]);
   const handleAdd = () => { 
@@ -699,10 +707,68 @@ const DoctorsView = React.memo(({ staffing, user }: { staffing: any, user: AuthU
     setEditingId(null); 
     setNewDoctor({ name: '', gender: 'Male', previousWards: [] }); 
   };
-  return (<div className="space-y-6"><div className="flex justify-between items-end bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><div><h2 className="text-xl font-bold text-slate-800">Personnel Registry</h2></div>{user.role === 'admin' && (<button className="btn-primary" onClick={() => setShowAdd(!showAdd)}><UserPlus className="w-4 h-4" /> Register</button>)}</div><AnimatePresence>{showAdd && user.role === 'admin' && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div className="technical-card p-8 bg-white mb-6 border-blue-100 ring-1 ring-blue-50"><div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div><label className="text-[10px] uppercase font-bold text-slate-400">Name</label><input type="text" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newDoctor.name} onChange={e => setNewDoctor(prev => ({ ...prev, name: e.target.value }))} /></div><div><label className="text-[10px] uppercase font-bold text-slate-400">Gender</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newDoctor.gender} onChange={e => setNewDoctor(prev => ({ ...prev, gender: e.target.value as Gender }))}><option value="Male">Male</option><option value="Female">Female</option></select></div></div><div className="flex gap-3 mt-8 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save</button></div></div></motion.div>)}</AnimatePresence><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Gender</th>{user.role === 'admin' && <th className="col-header text-right">Actions</th>}</tr></thead><tbody className="text-sm divide-y divide-slate-100">{filtered.map((d: Doctor) => (<tr key={d.id} className="hover:bg-slate-50/50 group"><td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{d.id}</td><td className="px-6 py-4 font-semibold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => onNavigate(d.id)}>{d.name}</td><td className="px-6 py-4 text-xs"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${d.gender === 'Male' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-pink-50 text-pink-600 border-pink-100'}`}>{d.gender}</span></td>{user.role === 'admin' && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(d.id); setNewDoctor(d); setShowAdd(true); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100" onClick={() => { if(confirm('Delete?')) staffing.deleteDoctor(d.id); }}><Trash2 className="w-4 h-4" /></button></td>}</tr>))}</tbody></table></div></div>);
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-end bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <div><h2 className="text-xl font-bold text-slate-800">Personnel Registry</h2></div>
+        {user.role === 'admin' && (<button className="btn-primary" onClick={() => { setShowAdd(!showAdd); setEditingId(null); setNewDoctor({ name: '', gender: 'Male', previousWards: [] }); }}><UserPlus className="w-4 h-4" /> Register</button>)}
+      </div>
+      <AnimatePresence>
+        {showAdd && user.role === 'admin' && !editingId && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+            <div className="technical-card p-8 bg-white mb-6 border-blue-100 ring-1 ring-blue-50">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div><label className="text-[10px] uppercase font-bold text-slate-400">Name</label><input type="text" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newDoctor.name} onChange={e => setNewDoctor(prev => ({ ...prev, name: e.target.value }))} /></div>
+                <div><label className="text-[10px] uppercase font-bold text-slate-400">Gender</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newDoctor.gender} onChange={e => setNewDoctor(prev => ({ ...prev, gender: e.target.value as Gender }))}><option value="Male">Male</option><option value="Female">Female</option></select></div>
+              </div>
+              <div className="flex gap-3 mt-8 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save</button></div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="technical-card overflow-hidden">
+        <table className="technical-grid">
+          <thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Gender</th>{user.role === 'admin' && <th className="col-header text-right">Actions</th>}</tr></thead>
+          <tbody className="text-sm divide-y divide-slate-100">
+            {filtered.map((d: Doctor) => (
+              editingId === d.id ? (
+                <tr key={d.id} className="bg-blue-50/30">
+                  <td colSpan={user.role === 'admin' ? 4 : 3} className="p-0">
+                    <div className="p-6 border-y border-blue-100 shadow-inner">
+                      <h4 className="text-[10px] font-bold uppercase tracking-widest text-blue-600 mb-4">Edit Personnel Record</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div><label className="text-[10px] uppercase font-bold text-slate-400">Name</label><input type="text" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newDoctor.name} onChange={e => setNewDoctor(prev => ({ ...prev, name: e.target.value }))} /></div>
+                        <div><label className="text-[10px] uppercase font-bold text-slate-400">Gender</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newDoctor.gender} onChange={e => setNewDoctor(prev => ({ ...prev, gender: e.target.value as Gender }))}><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                      </div>
+                      <div className="flex gap-3 mt-6 pt-4 border-t border-blue-100/50">
+                        <button className="btn-primary px-6 py-2" onClick={handleAdd}>Save Changes</button>
+                        <button className="px-6 py-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest" onClick={() => setEditingId(null)}>Cancel</button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={d.id} className="hover:bg-slate-50/50 group">
+                  <td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{d.id}</td>
+                  <td className="px-6 py-4 font-semibold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => onNavigate(d.id)}>{d.name}</td>
+                  <td className="px-6 py-4 text-xs"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${d.gender === 'Male' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-pink-50 text-pink-600 border-pink-100'}`}>{d.gender}</span></td>
+                  {user.role === 'admin' && (
+                    <td className="px-6 py-4 text-right flex justify-end gap-2">
+                      <button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => { setEditingId(d.id); setNewDoctor(d); setShowAdd(false); }}><Edit2 className="w-4 h-4" /></button>
+                      <button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => { if(confirm('Delete?')) staffing.deleteDoctor(d.id); }}><Trash2 className="w-4 h-4" /></button>
+                    </td>
+                  )}
+                </tr>
+              )
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 });
 
-const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUser }) => {
+const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) => {
     const isAdmin = user.role === 'admin';
     const currentPeriod = new Date().toISOString().slice(0, 7);
     const [targetPeriod, setTargetPeriod] = useState(currentPeriod);
@@ -741,95 +807,123 @@ const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUse
     };
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm gap-4">
-                <div><h2 className="text-xl font-bold text-slate-800">Unit Configuration</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Personnel Dispatch & Unit Management</p></div>
-                <div className="flex items-center gap-3 w-full md:w-auto">
-                    <input type="month" className="text-sm p-2 bg-slate-50 border border-slate-200 rounded-xl" value={targetPeriod} onChange={(e) => setTargetPeriod(e.target.value)} />
-                    {isAdmin && (<button className="btn-primary" onClick={() => setShowAdd(!showAdd)}><Plus className="w-4 h-4" /> Add Unit</button>)}
-                </div>
-            </div>
-
-            {isAdmin && (
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /> Unassigned Personnel Pool ({targetPeriod})</h3>
-                    <div className="flex flex-wrap gap-2">
-                        {unassignedDoctors.length > 0 ? unassignedDoctors.map((d: Doctor) => (
-                            <div key={d.id} draggable onDragStart={() => setDragDoctor(d.id)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-blue-50 transition-all flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${d.gender === 'Male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-                                {d.name}
-                            </div>
-                        )) : (
-                            <p className="text-xs text-slate-400 italic">All clinicians have been dispatched for this rotation.</p>
-                        )}
-                    </div>
-                    <p className="mt-4 text-[10px] text-slate-400 font-bold uppercase tracking-tighter italic">* Drag a physician from the pool and drop them on a unit below to manually assign them.</p>
-                </div>
-            )}
-
-            <AnimatePresence>{showAdd && isAdmin && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                    <div className="technical-card p-8 space-y-6 bg-white mb-6 border-blue-100 ring-1 ring-blue-50">
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                            <div className="md:col-span-2"><label className="text-[10px] uppercase font-bold text-slate-400">Designation</label><input type="text" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.name} onChange={e => setNewWard(prev => ({ ...prev, name: e.target.value }))} /></div>
-                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Monthly Capacity</label><input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.totalDoctors} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, totalDoctors: parseInt(e.target.value) } }))} /></div>
-                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Gender Policy</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.genderDiversity} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, genderDiversity: e.target.value as any } }))}><option value="None">No Preference</option><option value="Balanced">Balanced Mix</option><option value="Specific">Specific Quota</option></select></div>
-                        </div>
-                        {newWard.requirements?.genderDiversity === 'Specific' && (
-                            <div className="grid grid-cols-2 gap-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                                <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Male</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg" value={newWard.requirements?.requiredMale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredMale: parseInt(e.target.value) } }))} /></div>
-                                <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Female</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg" value={newWard.requirements?.requiredFemale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredFemale: parseInt(e.target.value) } }))} /></div>
-                            </div>
-                        )}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
-                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Hierarchy</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.parentWardId || ''} onChange={e => setNewWard(prev => ({ ...prev, parentWardId: e.target.value || undefined }))}><option value="">Main Unit (Stand-alone)</option>{staffing.wards.filter((w: Ward) => w.id !== editingId).map((w: Ward) => (<option key={w.id} value={w.id}>Subordinate to {w.name}</option>))}</select></div>
-                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1|2 } }))}><option value={1}>1 Physician Per Shift</option><option value={2}>2 Physicians Per Shift</option></select></div>
-                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div>
-                        </div>
-                        <div className="flex gap-3 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save Unit</button></div>
-                    </div>
-                </motion.div>
-            )}</AnimatePresence>
-
-            <div className="technical-card overflow-hidden">
-                <table className="technical-grid">
-                    <thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Shift Specs</th><th className="col-header">Status</th><th className="col-header">Personnel Pool</th>{isAdmin && <th className="col-header text-right">Actions</th>}</tr></thead>
-                    <tbody className="text-sm divide-y divide-slate-100">
-                        {staffing.wards.map((w: Ward) => {
-                            const assignment = periodAssignments.find((a: any) => a.wardId === w.id);
-                            const docCount = assignment?.doctorIds.length || 0;
-                            return (
-                                <tr key={w.id} onDragOver={e => isAdmin && e.preventDefault()} onDrop={() => handleDrop(w.id)} className={`hover:bg-slate-50/50 group transition-all ${dragDoctor ? 'bg-blue-50/50 ring-1 ring-blue-100 ring-inset' : ''}`}>
-                                    <td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{w.id}</td>
-                                    <td className="px-6 py-4 font-semibold text-slate-800">{w.name}</td>
-                                    <td className="px-6 py-4"><div className="flex gap-2"><span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded border border-blue-100 flex items-center gap-1"><Activity className="w-3 h-3" /> {w.requirements.staffPerShift} Doc</span><span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Clock className="w-3 h-3" /> {w.requirements.shiftDuration}</span></div></td>
-                                    <td className="px-6 py-4">
-                                        {w.parentWardId ? (
-                                            <span className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Link className="w-3 h-3" /> Sub to {staffing.wardMap.get(w.parentWardId)?.name}</span>
-                                        ) : (
-                                            <span className="px-2 py-0.5 bg-green-50 text-green-600 text-[9px] font-bold uppercase rounded border border-green-100">Main Station</span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex -space-x-2">
-                                                {assignment?.doctorIds.slice(0, 3).map((id: string) => (
-                                                    <div key={id} className="w-7 h-7 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-600 shadow-sm">{staffing.doctorMap.get(id)?.name.charAt(0)}</div>
-                                                ))}
-                                                {docCount > 3 && <div className="w-7 h-7 rounded-full border-2 border-white bg-blue-600 flex items-center justify-center text-[8px] font-bold text-white">+{docCount - 3}</div>}
-                                            </div>
-                                            <span className={`text-[10px] font-bold uppercase tracking-tighter ${docCount >= w.requirements.totalDoctors ? 'text-green-600' : 'text-amber-500'}`}>{docCount} / {w.requirements.totalDoctors} Staffed</span>
-                                        </div>
-                                    </td>
-                                    {isAdmin && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(w.id); setNewWard(w); setShowAdd(true); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100" onClick={() => { if(confirm('Remove?')) staffing.deleteWard(w.id); }}><Trash2 className="w-4 h-4" /></button></td>}
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            </div>
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm gap-4">
+        <div><h2 className="text-xl font-bold text-slate-800">Unit Configuration</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Personnel Dispatch & Unit Management</p></div>
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <input type="month" className="text-sm p-2 bg-slate-50 border border-slate-200 rounded-xl" value={targetPeriod} onChange={(e) => setTargetPeriod(e.target.value)} />
+          {isAdmin && (<button className="btn-primary" onClick={() => { setShowAdd(!showAdd); setEditingId(null); setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' } }); }}><Plus className="w-4 h-4" /> Add Unit</button>)}
         </div>
-    );
+      </div>
+
+      {isAdmin && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /> Unassigned Personnel Pool ({targetPeriod})</h3>
+          <div className="flex flex-wrap gap-2">
+            {unassignedDoctors.length > 0 ? unassignedDoctors.map((d: Doctor) => (
+              <div key={d.id} draggable onDragStart={() => setDragDoctor(d.id)} onClick={() => onNavigate(d.id)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-blue-50 transition-all flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${d.gender === 'Male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                {d.name}
+              </div>
+            )) : (
+              <p className="text-xs text-slate-400 italic">All clinicians have been dispatched for this rotation.</p>
+            )}
+          </div>
+          <p className="mt-4 text-[10px] text-slate-400 font-bold uppercase tracking-tighter italic">* Drag a physician from the pool and drop them on a unit below to manually assign them.</p>
+        </div>
+      )}
+
+      <AnimatePresence>{showAdd && isAdmin && !editingId && (
+        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+          <div className="technical-card p-8 space-y-6 bg-white mb-6 border-blue-100 ring-1 ring-blue-50">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="md:col-span-2"><label className="text-[10px] uppercase font-bold text-slate-400">Designation</label><input type="text" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.name} onChange={e => setNewWard(prev => ({ ...prev, name: e.target.value }))} /></div>
+              <div><label className="text-[10px] uppercase font-bold text-slate-400">Monthly Capacity</label><input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.totalDoctors} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, totalDoctors: parseInt(e.target.value) } }))} /></div>
+              <div><label className="text-[10px] uppercase font-bold text-slate-400">Gender Policy</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.genderDiversity} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, genderDiversity: e.target.value as any } }))}><option value="None">No Preference</option><option value="Balanced">Balanced Mix</option><option value="Specific">Specific Quota</option></select></div>
+            </div>
+            {newWard.requirements?.genderDiversity === 'Specific' && (
+              <div className="grid grid-cols-2 gap-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Male</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg" value={newWard.requirements?.requiredMale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredMale: parseInt(e.target.value) } }))} /></div>
+                <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Female</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg" value={newWard.requirements?.requiredFemale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredFemale: parseInt(e.target.value) } }))} /></div>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
+              <div><label className="text-[10px] uppercase font-bold text-slate-400">Hierarchy</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.parentWardId || ''} onChange={e => setNewWard(prev => ({ ...prev, parentWardId: e.target.value || undefined }))}><option value="">Main Unit (Stand-alone)</option>{staffing.wards.filter((w: Ward) => w.id !== editingId).map((w: Ward) => (<option key={w.id} value={w.id}>Subordinate to {w.name}</option>))}</select></div>
+              <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1|2 } }))}><option value={1}>1 Physician Per Shift</option><option value={2}>2 Physicians Per Shift</option></select></div>
+              <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div>
+            </div>
+            <div className="flex gap-3 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save Unit</button></div>
+          </div>
+        </motion.div>
+      )}</AnimatePresence>
+
+      <div className="technical-card overflow-hidden">
+        <table className="technical-grid">
+          <thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Shift Specs</th><th className="col-header">Status</th><th className="col-header">Personnel Pool</th>{isAdmin && <th className="col-header text-right">Actions</th>}</tr></thead>
+          <tbody className="text-sm divide-y divide-slate-100">
+            {staffing.wards.map((w: Ward) => {
+              const assignment = periodAssignments.find((a: any) => a.wardId === w.id);
+              const docCount = assignment?.doctorIds.length || 0;
+              return editingId === w.id ? (
+                <tr key={w.id} className="bg-blue-50/30">
+                  <td colSpan={isAdmin ? 6 : 5} className="p-0">
+                    <div className="p-8 border-y border-blue-100 shadow-inner space-y-6">
+                      <h4 className="text-[10px] font-bold uppercase tracking-widest text-blue-600">Edit Unit Configuration</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div className="md:col-span-2"><label className="text-[10px] uppercase font-bold text-slate-400">Designation</label><input type="text" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.name} onChange={e => setNewWard(prev => ({ ...prev, name: e.target.value }))} /></div>
+                        <div><label className="text-[10px] uppercase font-bold text-slate-400">Monthly Capacity</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.totalDoctors} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, totalDoctors: parseInt(e.target.value) } }))} /></div>
+                        <div><label className="text-[10px] uppercase font-bold text-slate-400">Gender Policy</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.genderDiversity} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, genderDiversity: e.target.value as any } }))}><option value="None">No Preference</option><option value="Balanced">Balanced Mix</option><option value="Specific">Specific Quota</option></select></div>
+                      </div>
+                      {newWard.requirements?.genderDiversity === 'Specific' && (
+                        <div className="grid grid-cols-2 gap-6 p-4 bg-slate-50/50 rounded-xl border border-slate-100">
+                          <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Male</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.requiredMale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredMale: parseInt(e.target.value) } }))} /></div>
+                          <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Female</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.requiredFemale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredFemale: parseInt(e.target.value) } }))} /></div>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-blue-100/50">
+                        <div><label className="text-[10px] uppercase font-bold text-slate-400">Hierarchy</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.parentWardId || ''} onChange={e => setNewWard(prev => ({ ...prev, parentWardId: e.target.value || undefined }))}><option value="">Main Unit (Stand-alone)</option>{staffing.wards.filter((sw: Ward) => sw.id !== editingId).map((sw: Ward) => (<option key={sw.id} value={sw.id}>Subordinate to {sw.name}</option>))}</select></div>
+                        <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1|2 } }))}><option value={1}>1 Physician Per Shift</option><option value={2}>2 Physicians Per Shift</option></select></div>
+                        <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div>
+                      </div>
+                      <div className="flex gap-3 pt-6 border-t border-blue-100/50">
+                        <button className="btn-primary px-8" onClick={handleAdd}>Save Changes</button>
+                        <button className="px-6 py-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest" onClick={() => setEditingId(null)}>Cancel</button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={w.id} onDragOver={e => isAdmin && e.preventDefault()} onDrop={() => handleDrop(w.id)} className={`hover:bg-slate-50/50 group transition-all ${dragDoctor ? 'bg-blue-50/50 ring-1 ring-blue-100 ring-inset' : ''}`}>
+                  <td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{w.id}</td>
+                  <td className="px-6 py-4 font-semibold text-slate-800">{w.name}</td>
+                  <td className="px-6 py-4"><div className="flex gap-2"><span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded border border-blue-100 flex items-center gap-1"><Activity className="w-3 h-3" /> {w.requirements.staffPerShift} Doc</span><span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Clock className="w-3 h-3" /> {w.requirements.shiftDuration}</span></div></td>
+                  <td className="px-6 py-4">
+                    {w.parentWardId ? (
+                      <span className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Link className="w-3 h-3" /> Sub to {staffing.wardMap.get(w.parentWardId)?.name}</span>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-green-50 text-green-600 text-[9px] font-bold uppercase rounded border border-green-100">Main Station</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex -space-x-2">
+                        {assignment?.doctorIds.slice(0, 3).map((id: string) => (
+                          <div key={id} onClick={() => onNavigate(id)} className="w-7 h-7 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-600 shadow-sm cursor-pointer hover:border-blue-400 hover:text-blue-600 transition-all">{staffing.doctorMap.get(id)?.name.charAt(0)}</div>
+                        ))}
+                        {docCount > 3 && <div className="w-7 h-7 rounded-full border-2 border-white bg-blue-600 flex items-center justify-center text-[8px] font-bold text-white">+{docCount - 3}</div>}
+                      </div>
+                      <span className={`text-[10px] font-bold uppercase tracking-tighter ${docCount >= w.requirements.totalDoctors ? 'text-green-600' : 'text-amber-500'}`}>{docCount} / {w.requirements.totalDoctors} Staffed</span>
+                    </div>
+                  </td>
+                  {isAdmin && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => { setEditingId(w.id); setNewWard(w); setShowAdd(false); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => { if(confirm('Remove?')) staffing.deleteWard(w.id); }}><Trash2 className="w-4 h-4" /></button></td>}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 });
 
 const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelect, onNavigate }: { staffing: any, user: AuthUser, selectedPeriod: string | null, onSelect: (m: string | null) => void, onNavigate: (id: string) => void }) => {
@@ -898,7 +992,7 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
 
     const [year, month] = selectedPeriod.split('-').map(Number);
     const daysInMonth = new Date(year, month, 0).getDate();
-    const firstDayIdx = new Date(year, month - 1, 1).getDay();
+    const [dragState, setDragState] = useState<{ doctorId: string, wardId: string } | null>(null);
 
     return (
         <div className="space-y-6 pb-24">
@@ -948,8 +1042,8 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
                 )}
             </div>
 
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden min-h-[600px]">
-                {viewMode === 'dispatch' ? (
+            {viewMode === 'dispatch' ? (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden min-h-[600px]">
                     <div className="p-6">
                         <table className="technical-grid w-full">
                             <thead><tr className="bg-slate-50/50"><th className="col-header">Ward Unit</th><th className="col-header">Personnel Pool</th></tr></thead>
@@ -960,7 +1054,19 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
                                         <td className="px-6 py-4">
                                             <div className="flex flex-wrap gap-2">
                                                 {a.doctorIds.map(id => (
-                                                    <span key={id} onClick={() => onNavigate(id)} className="px-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 uppercase hover:border-blue-400 hover:text-blue-600 cursor-pointer transition-all">
+                                                    <span 
+                                                        key={id} 
+                                                        onClick={() => onNavigate(id)}
+                                                        draggable={isAdmin}
+                                                        onDragStart={() => setDragState({ doctorId: id, wardId: a.wardId })}
+                                                        onDragOver={(e) => isAdmin && e.preventDefault()}
+                                                        onDrop={() => {
+                                                            if (!dragState || !isAdmin || dragState.doctorId === id) return;
+                                                            staffing.swapPoolDoctors(selectedPeriod, dragState.wardId, dragState.doctorId, a.wardId, id);
+                                                            setDragState(null);
+                                                        }}
+                                                        className={`px-3 py-1 border rounded-lg text-[10px] font-bold uppercase cursor-pointer transition-all ${dragState?.doctorId === id ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'}`}
+                                                    >
                                                         {staffing.doctorMap.get(id)?.name}
                                                     </span>
                                                 ))}
@@ -972,30 +1078,16 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
                             </tbody>
                         </table>
                     </div>
-                ) : (
-                    <div className="grid grid-cols-7 gap-px bg-slate-200 overflow-hidden">
-                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (<div key={d} className="bg-slate-50 p-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200">{d}</div>))}
-                        {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`e-${i}`} className="bg-slate-50/50 min-h-[120px]" />)}
-                        {Array.from({ length: daysInMonth }).map((_, i) => {
-                            const day = i + 1;
-                            const dayShifts = (viewMode === 'ward' ? wardShifts : erShifts).filter((s: ShiftRecord) => s.day === day);
-                            return (
-                                <div key={day} className="bg-white p-3 min-h-[120px] border-b border-r border-slate-100 group relative hover:bg-slate-50/50 transition-colors">
-                                    <span className="text-xs font-bold text-slate-300 group-hover:text-blue-600 transition-colors">{day}</span>
-                                    <div className="mt-2 space-y-1.5">
-                                        {dayShifts.map(s => (
-                                            <div key={s.id} onClick={() => onNavigate(s.doctorId)} className={`p-1.5 rounded-lg border text-[9px] font-bold truncate cursor-pointer transition-all ${viewMode === 'er' ? 'bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100' : 'bg-blue-50 border-blue-100 text-blue-700 hover:bg-blue-100'}`}>
-                                                {staffing.doctorMap.get(s.doctorId)?.name}
-                                                <span className="block text-[7px] opacity-60 uppercase mt-0.5">{viewMode === 'ward' ? staffing.wardMap.get(s.wardId)?.name : (s.wardId === 'er-referral' ? 'Referral' : s.wardId.replace('er-', '').toUpperCase())}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
+                </div>
+            ) : viewMode === 'ward' ? (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden min-h-[600px] p-4 md:p-8">
+                    <ShiftCalendarView key={`ward-${selectedPeriod}`} staffing={staffing} onNavigate={onNavigate} archivePeriod={selectedPeriod || undefined} />
+                </div>
+            ) : (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden min-h-[600px] p-4 md:p-8">
+                    <ERCallsView key={`er-${selectedPeriod}`} staffing={staffing} user={user} onNavigate={onNavigate} archivePeriod={selectedPeriod || undefined} />
+                </div>
+            )}
         </div>
     );
 });

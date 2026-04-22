@@ -241,27 +241,27 @@ app.get('/api/wards', async (req, res) => {
 
 app.post('/api/wards', async (req, res) => {
   await getTablesReady();
-  const { id, name, requirements } = req.body;
+  const { id, name, requirements, parentWardId } = req.body;
   if (isUsingMock) {
-    mockDb.wards.push({ id, name, requirements });
+    mockDb.wards.push({ id, name, requirements, parentWardId });
     return res.json({ success: true });
   }
   try {
-    await upsertWard({ id, name, requirements });
+    await upsertWard({ id, name, requirements, parentWardId });
     res.status(201).json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/api/wards/:id', async (req, res) => {
   await getTablesReady();
-  const { name, requirements } = req.body;
+  const { name, requirements, parentWardId } = req.body;
   if (isUsingMock) {
     const idx = mockDb.wards.findIndex(w => w.id === req.params.id);
-    if (idx > -1) mockDb.wards[idx] = { id: req.params.id, name, requirements };
+    if (idx > -1) mockDb.wards[idx] = { id: req.params.id, name, requirements, parentWardId };
     return res.json({ success: true });
   }
   try {
-    await upsertWard({ id: req.params.id, name, requirements });
+    await upsertWard({ id: req.params.id, name, requirements, parentWardId });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

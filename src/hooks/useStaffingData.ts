@@ -323,17 +323,29 @@ export function useStaffingData() {
         const newA1 = { ...a1, doctorIds: a1.doctorIds.map(id => id === docA ? docB : id) };
         const newA2 = { ...a2, doctorIds: a2.doctorIds.map(id => id === docB ? docA : id) };
 
+        // Deep Swap: Switch all associated shifts for this month
+        const updatedShifts = data.shifts.map(s => {
+            if (s.period !== period) return s;
+            if (s.doctorId === docA) return { ...s, doctorId: docB };
+            if (s.doctorId === docB) return { ...s, doctorId: docA };
+            return s;
+        });
+        
+        const shiftsToPersist = updatedShifts.filter(s => s.period === period && (s.doctorId === docA || s.doctorId === docB));
+
         await Promise.all([
             fetch(`/api/assignments/${newA1.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newA1) }),
-            fetch(`/api/assignments/${newA2.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newA2) })
+            fetch(`/api/assignments/${newA2.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newA2) }),
+            fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(shiftsToPersist) })
         ]);
 
         setData(prev => ({
             ...prev,
-            assignments: prev.assignments.map(a => a.id === newA1.id ? newA1 : a.id === newA2.id ? newA2 : a)
+            assignments: prev.assignments.map(a => a.id === newA1.id ? newA1 : a.id === newA2.id ? newA2 : a),
+            shifts: updatedShifts
         }));
     } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
-  }, [data.assignments]);
+  }, [data.assignments, data.shifts]);
 
   const swapShiftDoctors = useCallback(async (period: string, shiftIdA: string, shiftIdB: string) => {
     setSyncing(true);
@@ -443,11 +455,19 @@ export function useStaffingData() {
     setSyncing(true);
     try {
         const assignment = data.assignments.find(a => a.period === period && a.wardId === wardId);
+        const ward = data.wards.find(w => w.id === wardId);
         let newAssignments = [...data.assignments];
+        let newWards = [...data.wards];
         let updatedDoctorIds = assignment ? [...assignment.doctorIds] : [];
         
         if (!updatedDoctorIds.includes(doctorId)) {
             updatedDoctorIds.push(doctorId);
+            // Auto-expand capacity if full
+            if (ward && updatedDoctorIds.length > ward.requirements.totalDoctors) {
+                const updatedWard = { ...ward, requirements: { ...ward.requirements, totalDoctors: updatedDoctorIds.length } };
+                newWards = newWards.map(w => w.id === wardId ? updatedWard : w);
+                await fetch(`/api/wards/${wardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedWard) });
+            }
         }
 
         if (assignment) {
@@ -456,7 +476,6 @@ export function useStaffingData() {
             newAssignments.push({ id: `${period}-${wardId}`, period, wardId, doctorIds: [doctorId] });
         }
 
-        // Update doctor history
         const doc = data.doctors.find(d => d.id === doctorId);
         const updatedDocs = data.doctors.map(d => d.id === doctorId && !d.previousWards.includes(wardId) ? { ...d, previousWards: [...d.previousWards, wardId] } : d);
 
@@ -466,7 +485,7 @@ export function useStaffingData() {
             body: JSON.stringify({ assignments: newAssignments, doctors: updatedDocs.filter(d => d.id === doctorId) }) 
         });
 
-        setData(prev => ({ ...prev, assignments: newAssignments, doctors: updatedDocs }));
+        setData(prev => ({ ...prev, assignments: newAssignments, doctors: updatedDocs, wards: newWards }));
     } catch (e) { alert('Manual assignment failed.'); } finally { setSyncing(false); }
   }, [data]);
 
