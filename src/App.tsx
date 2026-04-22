@@ -460,7 +460,7 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
             </div>
         </div>
     );
-}
+});
 
 function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => Promise<boolean>, isLoading: boolean }) {
     const [name, setName] = useState(''); const [pass, setPass] = useState(''); const [error, setError] = useState(false);
@@ -600,14 +600,13 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
             </div>
         </div>
     );
-}
+});
 
 const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) => {
   const myAssignment = staffing.assignments.filter((a: any) => a.doctorIds.includes(user.id)).sort((a: any, b: any) => b.period.localeCompare(a.period))[0];
   const isAdmin = user.role === 'admin';
   const currentMonth = new Date().toISOString().slice(0, 7);
   const currentDay = new Date().getDate();
-  const targetPeriod = currentMonth; // or keep existing targetPeriod logic if it existed, wait, Dashboard had targetPeriod state? No. Let's add it.
   const [generatePeriod, setGeneratePeriod] = useState(currentMonth);
 
   const upcomingShifts = useMemo(() => {
@@ -999,7 +998,7 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
             </div>
         </div>
     );
-};
+});
 
 const AssignmentsView = React.memo(({ staffing }: { staffing: any }) => {
     return (<div className="space-y-6"><div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><h2 className="text-xl font-bold text-slate-800">Dispatch History</h2></div><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">Period</th><th className="col-header">Ward</th><th className="col-header">Personnel Pool</th></tr></thead><tbody className="text-sm divide-y divide-slate-100">{staffing.assignments.slice().reverse().map((a: Assignment) => (<tr key={a.id}><td className="px-6 py-4 text-[10px] font-mono text-blue-600 font-bold uppercase">{a.period}</td><td className="px-6 py-4 font-semibold text-slate-800">{staffing.wardMap.get(a.wardId)?.name}</td><td className="px-6 py-4"><div className="flex flex-wrap gap-1.5 font-mono text-[9px]">{a.doctorIds.map(id => (<span key={id} className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-bold uppercase">{staffing.doctorMap.get(id)?.name}</span>))}</div></td></tr>))}</tbody></table></div></div>);
