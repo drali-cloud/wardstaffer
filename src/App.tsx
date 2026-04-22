@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CircleCheck, Scale, History, RotateCcw, TriangleAlert, CircleX
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
 import { Doctor, Ward, Gender, Assignment, ShiftRecord, AuditLog } from './types';
 import * as XLSX from 'xlsx';
@@ -36,7 +36,6 @@ interface AuthUser {
 }
 
 export default function App() {
-  return <div style={{padding: '50px', background: 'blue', color: 'white', fontSize: '24px'}}>APP COMPONENT EXECUTED</div>;
   const [user, setUser] = useState<AuthUser | null>(() => {
       try {
           const saved = localStorage.getItem('wardstaffer_user');
@@ -142,7 +141,7 @@ export default function App() {
                 {currentView === 'doctors' && <DoctorsView staffing={staffing} user={user} onNavigate={navigateToDoctor} />}
                 {currentView === 'wards' && <WardsView staffing={staffing} user={user} onNavigate={navigateToDoctor} />}
                 {currentView === 'archive' && <MonthlyArchiveView staffing={staffing} user={user} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} onNavigate={navigateToDoctor} />}
-                {currentView === 'assignments' && <AssignmentsView staffing={staffing} onNavigate={navigateToDoctor} />}
+                {currentView === 'assignments' && <AssignmentsView staffing={staffing} />}
                 {currentView === 'profile' && <ProfileView staffing={staffing} user={user} targetDoctorId={viewingDoctorId} />}
                 {currentView === 'equity' && <EquityView staffing={staffing} onNavigate={navigateToDoctor} />}
               </motion.div>
@@ -1230,6 +1229,7 @@ const HistoryLogView = React.memo(({ staffing }: { staffing: any }) => {
 function StatCard({ label, value, icon }: { label: string, value: number, icon: React.ReactNode }) { return (<div className="bg-white border border-slate-200 rounded-xl p-6 flex items-start justify-between shadow-sm hover:shadow-md transition-shadow"><div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">{label}</p><p className="text-3xl font-bold text-slate-900">{value}</p></div><div className="bg-blue-50 p-2.5 rounded-lg">{icon}</div></div>); }
 
 const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavigate: (id: string) => void }) => {
+    const isAdmin = true; // For now, since it's the admin view anyway
     const currentMonth = new Date().toISOString().slice(0, 7);
     const [targetPeriod, setTargetPeriod] = useState(currentMonth);
     const [excludedWardIds, setExcludedWardIds] = useState<string[]>(() => {
