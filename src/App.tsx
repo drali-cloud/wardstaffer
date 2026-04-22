@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CheckCircle, Scale, History, RotateCcw
+  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CheckCircle, Scale, History, RotateCcw, AlertTriangle, XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
@@ -1172,6 +1172,64 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
             });
     }, [staffing.doctors, targetPeriod, staffing.calculateTotalHours, excludedWardIds, staffing.assignments, staffing.wardMap]);
 
+    const integrityAudit = useMemo(() => {
+        const periodAssignments = staffing.assignments.filter((a: any) => a.period === targetPeriod);
+        const periodShifts = staffing.shifts.filter((s: any) => s.period === targetPeriod);
+        
+        // 1. Gyne Rule (Female Only)
+        const gyneWards = staffing.wards.filter((w: Ward) => w.name.toLowerCase().includes('gyne'));
+        const gyneViolations: string[] = [];
+        gyneWards.forEach((w: Ward) => {
+            const assignment = periodAssignments.find((a: Assignment) => a.wardId === w.id);
+            if (assignment) {
+                assignment.doctorIds.forEach(dId => {
+                    const doc = staffing.doctorMap.get(dId);
+                    if (doc && doc.gender !== 'Female') gyneViolations.push(`${doc.name} (${w.name})`);
+                });
+            }
+        });
+
+        // 2. Pediatrics Balance
+        const pedsWards = staffing.wards.filter((w: Ward) => w.name.toLowerCase().includes('pediatric'));
+        const pedsViolations: string[] = [];
+        pedsWards.forEach((w: Ward) => {
+            const assignment = periodAssignments.find((a: Assignment) => a.wardId === w.id);
+            if (assignment && assignment.doctorIds.length > 0) {
+                const docs = assignment.doctorIds.map(id => staffing.doctorMap.get(id)).filter(Boolean);
+                const females = docs.filter(d => d.gender === 'Female').length;
+                const ratio = females / docs.length;
+                if (ratio < 0.35 || ratio > 0.65) pedsViolations.push(`${w.name} (${Math.round(ratio*100)}% F)`);
+            }
+        });
+
+        // 3. Conflicts
+        const conflicts: string[] = [];
+        staffing.doctors.forEach((doc: Doctor) => {
+            if (doc.id === 'root') return;
+            const docShifts = periodShifts.filter((s: ShiftRecord) => s.doctorId === doc.id).sort((a: any, b: any) => a.day - b.day);
+            const daysSeen = new Set();
+            for (let i = 0; i < docShifts.length; i++) {
+                const s = docShifts[i];
+                if (daysSeen.has(s.day)) conflicts.push(`${doc.name} Day ${s.day} overlap`);
+                daysSeen.add(s.day);
+                if (i < docShifts.length - 1 && docShifts[i+1].day === s.day + 1) {
+                    conflicts.push(`${doc.name} back-to-back Day ${s.day}-${docShifts[i+1].day}`);
+                }
+            }
+        });
+
+        // 4. Unassigned
+        const assignedIds = new Set(periodAssignments.flatMap((a: Assignment) => a.doctorIds));
+        const unassignedCount = staffing.doctors.filter((d: Doctor) => d.id !== 'root' && !assignedIds.has(d.id)).length;
+
+        return [
+            { id: 'gyne', label: 'Gynecology Female-Only Compliance', status: gyneViolations.length === 0 ? 'pass' : 'fail', detail: gyneViolations.length > 0 ? `Violations: ${gyneViolations.join(', ')}` : 'All Gynecology units are female-only compliant.' },
+            { id: 'peds', label: 'Pediatric Gender Equilibrium', status: pedsViolations.length === 0 ? 'pass' : 'warn', detail: pedsViolations.length > 0 ? `Skewed: ${pedsViolations.join(', ')}` : 'Pediatric units maintain gender diversity.' },
+            { id: 'conflicts', label: 'Shift Overlap & Fatigue Audit', status: conflicts.length === 0 ? 'pass' : 'fail', detail: conflicts.length > 0 ? `Conflicts: ${conflicts.slice(0,2).join('; ')}` : 'No conflicting or back-to-back shifts detected.' },
+            { id: 'assigned', label: 'Personnel Dispatch Coverage', status: unassignedCount === 0 ? 'pass' : 'warn', detail: unassignedCount > 0 ? `${unassignedCount} physicians remain unassigned.` : 'Full clinical staff deployment achieved.' }
+        ];
+    }, [staffing.doctors, staffing.wards, staffing.assignments, staffing.shifts, staffing.doctorMap, targetPeriod]);
+
     const activeStats = sortedDoctors.filter(d => !d.isExcluded);
     const maxDoc = activeStats[0];
     const minDoc = activeStats[activeStats.length - 1];
@@ -1326,6 +1384,23 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                     )}
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm">
+                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><ListChecks className="w-4 h-4 text-blue-600" /> Clinical Integrity Checklist</h3>
+                        <div className="space-y-4">
+                            {integrityAudit.map(check => (
+                                <div key={check.id} className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-[10px] font-black uppercase text-slate-700">{check.label}</span>
+                                        {check.status === 'pass' ? <CheckCircle className="w-4 h-4 text-green-500" /> : 
+                                         check.status === 'warn' ? <AlertTriangle className="w-4 h-4 text-amber-500" /> : 
+                                         <XCircle className="w-4 h-4 text-red-500" />}
+                                    </div>
+                                    <p className="text-[10px] text-slate-500 leading-relaxed italic">{check.detail}</p>
+                                </div>
+                            ))}
                         </div>
                     </div>
 

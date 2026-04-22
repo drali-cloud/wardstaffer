@@ -401,7 +401,7 @@ export function useStaffingData() {
 
                 cat.slots.forEach((staffCount, slotIdx) => {
                     for (let s = 0; s < staffCount; s++) {
-                        // Pass 1: Strict (with rest periods)
+                        // Pass 1: Strict (with 12h rest periods)
                         let eligible = poolArray
                             .filter(candidate => {
                                 const doc = doctorMap.get(candidate);
@@ -411,7 +411,13 @@ export function useStaffingData() {
                                 const hasWardShiftYesterday = wardShifts.some(s => s.day === day - 1 && s.doctorId === candidate);
                                 const hasWardShiftTomorrow = wardShifts.some(s => s.day === day + 1 && s.doctorId === candidate);
                                 const hasOtherERToday = newERShifts.some(s => s.day === day && s.doctorId === candidate);
-                                return !hasWardShiftToday && !hasWardShiftYesterday && !hasWardShiftTomorrow && !hasOtherERToday;
+
+                                // Rule: If ER call is Slot 3/4 (Index 2/3), 12h gap from yesterday's 8am-8am shift is respected.
+                                const isNightCall = slotIdx >= 2;
+                                const yesterdayConflict = hasWardShiftYesterday && !isNightCall;
+                                const tomorrowConflict = hasWardShiftTomorrow && isNightCall; // Slot 3/4 ends at 2am/8am, Shift starts at 8am
+
+                                return !hasWardShiftToday && !yesterdayConflict && !tomorrowConflict && !hasOtherERToday;
                             })
                             .sort((a, b) => hoursMap[a] - hoursMap[b]);
 
@@ -521,7 +527,20 @@ export function useStaffingData() {
             let swapped = false;
 
             for (const shift of erShifts) {
-                const isConflict = currentShifts.some(s => s.period === period && s.doctorId === minDoc.id && s.day === shift.day);
+                const isConflict = currentShifts.some(s => {
+                    if (s.period !== period || s.doctorId !== minDoc.id) return false;
+                    
+                    // Same day check
+                    if (s.day === shift.day) return true;
+                    
+                    // 12h Gap Check (Shift 8am-8am, ER Night Call Relaxation)
+                    const isNightER = (shift.slotIndex || 0) >= 2;
+                    if (s.day === shift.day - 1 && !isNightER) return true; // Previous day ward shift vs Day ER Call
+                    if (s.day === shift.day + 1 && isNightER) return true; // Night ER Call vs Next day ward shift
+                    
+                    return false;
+                });
+
                 if (!isConflict) {
                     currentShifts = currentShifts.map(s => s.id === shift.id ? { ...s, doctorId: minDoc.id } : s);
                     swapped = true;
