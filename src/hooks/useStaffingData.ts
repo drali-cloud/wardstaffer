@@ -177,7 +177,10 @@ export function useStaffingData() {
         .filter(s => s.doctorId === doctorId && (!period || s.period === period))
         .reduce((total, s) => {
             if (s.wardId === 'er-referral') return total + 24;
-            if (s.wardId.startsWith('er-')) return total + 12;
+            if (s.wardId === 'er-men' || s.wardId === 'er-women') return total + 6;
+            if (s.wardId === 'er-pediatric') return total + 8;
+            if (s.wardId.startsWith('er-')) return total + 12; // Fallback for other ER
+            
             // Use ward's actual configured shift duration (ICU/CCU may be 12h, not 24h)
             const ward = data.wards.find(w => w.id === s.wardId);
             const duration = ward?.requirements?.shiftDuration;
@@ -391,9 +394,11 @@ export function useStaffingData() {
             { id: 'er-referral', name: 'Daily Referral', slots: [1], wards: [...config.men, ...config.women, ...config.pediatric], duration: 24, maleOnly: true }
         ];
 
-        // Track cumulative hours per doctor for the period
+        // Track cumulative hours per doctor for the period, starting with ward shifts
         const hoursMap: Record<string, number> = {};
-        data.doctors.forEach(d => hoursMap[d.id] = 0);
+        data.doctors.forEach(d => {
+            hoursMap[d.id] = calculateTotalHours(d.id, period, wardShifts);
+        });
 
         for (let day = 1; day <= daysInMonth; day++) {
             categories.forEach(cat => {

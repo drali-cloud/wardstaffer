@@ -1250,23 +1250,47 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
 
     const sortedDoctors = useMemo(() => {
         const periodAssignments = staffing.assignments.filter((a: any) => a.period === targetPeriod);
+        const periodShifts = staffing.shifts.filter((s: any) => s.period === targetPeriod);
 
         return staffing.doctors
+            .filter((d: Doctor) => d.id !== 'root')
             .map((d: Doctor) => {
                 const assignment = periodAssignments.find((a: any) => a.doctorIds.includes(d.id));
                 const isExcluded = assignment && excludedWardIds.includes(assignment.wardId);
+                
+                // Calculate breakdown for transparency
+                const doctorShifts = periodShifts.filter((s: any) => s.doctorId === d.id);
+                const wardHours = doctorShifts
+                    .filter((s: any) => !s.wardId.startsWith('er-'))
+                    .reduce((total: number, s: any) => {
+                        const ward = staffing.wardMap.get(s.wardId);
+                        const duration = ward?.requirements?.shiftDuration;
+                        return total + (duration === '6h' ? 6 : duration === '12h' ? 12 : 24);
+                    }, 0);
+                
+                const erHours = doctorShifts
+                    .filter((s: any) => s.wardId.startsWith('er-'))
+                    .reduce((total: number, s: any) => {
+                        if (s.wardId === 'er-referral') return total + 24;
+                        if (s.wardId === 'er-men' || s.wardId === 'er-women') return total + 6;
+                        if (s.wardId === 'er-pediatric') return total + 8;
+                        return total + 12;
+                    }, 0);
+
                 return {
                     ...d,
                     currentWard: assignment ? staffing.wardMap.get(assignment.wardId)?.name : 'Float/Unassigned',
                     isExcluded,
-                    totalHours: staffing.calculateTotalHours(d.id, targetPeriod)
+                    wardHours,
+                    erHours,
+                    totalHours: wardHours + erHours
                 };
             })
             .sort((a: any, b: any) => {
                 if (a.isExcluded !== b.isExcluded) return a.isExcluded ? 1 : -1;
                 return b.totalHours - a.totalHours;
             });
-    }, [staffing.doctors, targetPeriod, staffing.calculateTotalHours, excludedWardIds, staffing.assignments, staffing.wardMap]);
+    }, [staffing.doctors, targetPeriod, staffing.shifts, excludedWardIds, staffing.assignments, staffing.wardMap]);
 
     const integrityAudit = useMemo(() => {
         const periodAssignments = staffing.assignments.filter((a: any) => a.period === targetPeriod);
@@ -1308,8 +1332,13 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                 const s = docShifts[i];
                 if (daysSeen.has(s.day)) conflicts.push(`${doc.name} Day ${s.day} overlap`);
                 daysSeen.add(s.day);
+                
+                // Only flag back-to-back if it's ER to Ward (Night Fatigue Rule)
                 if (i < docShifts.length - 1 && docShifts[i + 1].day === s.day + 1) {
-                    conflicts.push(`${doc.name} back-to-back Day ${s.day}-${docShifts[i + 1].day}`);
+                    const isNightER = s.wardId.startsWith('er-') && (s.slotIndex ?? 0) >= 2;
+                    if (isNightER) {
+                        conflicts.push(`${doc.name} Fatigue: Night ER on Day ${s.day} vs Ward on Day ${s.day+1}`);
+                    }
                 }
             }
         });
@@ -1321,7 +1350,7 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
         return [
             { id: 'gyne', label: 'Gynecology Female-Only Compliance', status: gyneViolations.length === 0 ? 'pass' : 'fail', detail: gyneViolations.length > 0 ? `Violations: ${gyneViolations.join(', ')}` : 'All Gynecology units are female-only compliant.' },
             { id: 'peds', label: 'Pediatric Gender Equilibrium', status: pedsViolations.length === 0 ? 'pass' : 'warn', detail: pedsViolations.length > 0 ? `Skewed: ${pedsViolations.join(', ')}` : 'Pediatric units maintain gender diversity.' },
-            { id: 'conflicts', label: 'Shift Overlap & Fatigue Audit', status: conflicts.length === 0 ? 'pass' : 'fail', detail: conflicts.length > 0 ? `Conflicts: ${conflicts.slice(0, 2).join('; ')}` : 'No conflicting or back-to-back shifts detected.' },
+            { id: 'conflicts', label: 'Shift Overlap & Fatigue Audit', status: conflicts.length === 0 ? 'pass' : 'fail', detail: conflicts.length > 0 ? `Conflicts: ${conflicts.slice(0, 2).join('; ')}` : 'No conflicting or fatigue-risk shifts detected.' },
             { id: 'assigned', label: 'Personnel Dispatch Coverage', status: unassignedCount === 0 ? 'pass' : 'warn', detail: unassignedCount > 0 ? `${unassignedCount} physicians remain unassigned.` : 'Full clinical staff deployment achieved.' }
         ];
     }, [staffing.doctors, staffing.wards, staffing.assignments, staffing.shifts, staffing.doctorMap, targetPeriod]);
@@ -1348,40 +1377,30 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                     <div className="relative">
                         <button
                             onClick={() => setShowExclusionDrop(!showExclusionDrop)}
-                            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg"
+                            className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-2"
                         >
-                            <Shield className="w-4 h-4" />
-                            Exemptions ({excludedWardIds.length})
+                            <Filter className="w-4 h-4" /> Units Exempted ({excludedWardIds.length})
                         </button>
                         {showExclusionDrop && (
-                            <>
-                                <div className="fixed inset-0 z-40" onClick={() => setShowExclusionDrop(false)} />
-                                <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 p-4 max-h-[400px] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
-                                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
-                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Exclude Units from Audit</span>
-                                        <button onClick={() => setExcludedWardIds([])} className="text-[10px] font-bold text-blue-600 uppercase hover:underline">Clear</button>
-                                    </div>
-                                    <div className="space-y-1">
-                                        {staffing.wards.map((w: Ward) => (
-                                            <label key={w.id} className="flex items-center gap-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors group/item">
-                                                <div className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all ${excludedWardIds.includes(w.id) ? 'bg-blue-600 border-blue-600 shadow-md shadow-blue-600/20' : 'border-slate-300 bg-white group-hover/item:border-blue-400'}`}>
-                                                    {excludedWardIds.includes(w.id) && <Check className="w-3 h-3 text-white" />}
-                                                </div>
-                                                <input
-                                                    type="checkbox"
-                                                    className="hidden"
-                                                    checked={excludedWardIds.includes(w.id)}
-                                                    onChange={(e) => {
-                                                        if (e.target.checked) setExcludedWardIds([...excludedWardIds, w.id]);
-                                                        else setExcludedWardIds(excludedWardIds.filter(id => id !== w.id));
-                                                    }}
-                                                />
-                                                <span className={`text-xs font-bold ${excludedWardIds.includes(w.id) ? 'text-slate-900' : 'text-slate-500'}`}>{w.name}</span>
-                                            </label>
-                                        ))}
-                                    </div>
+                            <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-xl z-[100] p-4">
+                                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Toggle Exemption</h4>
+                                <div className="space-y-1 max-h-60 overflow-y-auto">
+                                    {staffing.wards.filter((w: Ward) => !w.parentWardId).map((w: Ward) => (
+                                        <label key={w.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-xl cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={excludedWardIds.includes(w.id)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) setExcludedWardIds([...excludedWardIds, w.id]);
+                                                    else setExcludedWardIds(excludedWardIds.filter(id => id !== w.id));
+                                                }}
+                                                className="w-4 h-4 rounded text-blue-600"
+                                            />
+                                            <span className="text-xs font-bold text-slate-700">{w.name}</span>
+                                        </label>
+                                    ))}
                                 </div>
-                            </>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -1408,7 +1427,7 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                         <tr className="bg-white border-b border-slate-100">
                                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Physician</th>
                                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Primary Unit</th>
-                                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Weighted Hours</th>
+                                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Workload (Ward/ER)</th>
                                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Status</th>
                                         </tr>
                                     </thead>
@@ -1425,11 +1444,25 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                                     <span className="text-xs font-medium text-slate-500">{d.currentWard}</span>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                                            <div className={`h-full transition-all duration-1000 ${d.totalHours > 180 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${Math.min((d.totalHours / 250) * 100, 100)}%` }} />
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="flex flex-col gap-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                                    <div className={`h-full bg-blue-500`} style={{ width: `${Math.min((d.wardHours / 160) * 100, 100)}%` }} />
+                                                                </div>
+                                                                <span className="text-[10px] font-bold text-slate-400">{d.wardHours}h</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                                    <div className={`h-full bg-indigo-500`} style={{ width: `${Math.min((d.erHours / 80) * 100, 100)}%` }} />
+                                                                </div>
+                                                                <span className="text-[10px] font-bold text-slate-400">{d.erHours}h</span>
+                                                            </div>
                                                         </div>
-                                                        <span className="text-sm font-black text-slate-900">{d.totalHours}h</span>
+                                                        <div className="flex flex-col items-end">
+                                                            <span className="text-sm font-black text-slate-900">{d.totalHours}h</span>
+                                                            <span className="text-[8px] font-bold text-slate-300 uppercase tracking-tighter">Total Weighted</span>
+                                                        </div>
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 text-right">
