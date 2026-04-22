@@ -406,29 +406,53 @@ export function useStaffingData() {
                 const poolArray = Array.from(pool);
                 if (poolArray.length === 0) return;
 
+
                 cat.slots.forEach((staffCount, slotIdx) => {
                     for (let s = 0; s < staffCount; s++) {
-                        // Pass 1: Strict (with 12h rest periods)
+
+                        // --- Slot time boundaries (hours from day midnight) ---
+                        // Slot 0: 08:00-14:00  Slot 1: 14:00-20:00
+                        // Slot 2: 20:00-02:00  Slot 3: 02:00-08:00
+                        const SLOT_START = [8, 14, 20, 26]; // 26 = 02:00 next-day
+                        const SLOT_END   = [14, 20, 26, 32]; // 32 = 08:00 next-day
+
+                        // Helper: does yesterday's ER shift violate 12h rest before today's slotIdx?
+                        const hasERConflictYesterday = (candidate: string): boolean => {
+                            return newERShifts.some(prev => {
+                                if (prev.day !== day - 1 || prev.doctorId !== candidate) return false;
+                                const prevEndHour = SLOT_END[prev.slotIndex] ?? 24;
+                                const todayStartHour = SLOT_START[slotIdx] ?? 8;
+                                // prevEnd is already relative to yesterday; today's start is +24h from yesterday midnight
+                                // gap = (todayStartHour + 24) - prevEndHour
+                                const gap = (todayStartHour + 24) - prevEndHour;
+                                return gap < 12;
+                            });
+                        };
+
+                        // Pass 1: Strict (ward 12h rest + ER cross-day 12h rest)
                         let eligible = poolArray
                             .filter(candidate => {
                                 const doc = doctorMap.get(candidate);
                                 if (cat.maleOnly && doc?.gender !== 'Male') return false;
 
-                                const hasWardShiftToday = wardShifts.some(s => s.day === day && s.doctorId === candidate);
+                                const hasWardShiftToday     = wardShifts.some(s => s.day === day     && s.doctorId === candidate);
                                 const hasWardShiftYesterday = wardShifts.some(s => s.day === day - 1 && s.doctorId === candidate);
-                                const hasWardShiftTomorrow = wardShifts.some(s => s.day === day + 1 && s.doctorId === candidate);
-                                const hasOtherERToday = newERShifts.some(s => s.day === day && s.doctorId === candidate);
+                                const hasWardShiftTomorrow  = wardShifts.some(s => s.day === day + 1 && s.doctorId === candidate);
+                                const hasOtherERToday       = newERShifts.some(s => s.day === day     && s.doctorId === candidate);
 
-                                // Rule: If ER call is Slot 3/4 (Index 2/3), 12h gap from yesterday's 8am-8am shift is respected.
+                                // Ward-to-ER 12h rule (existing)
                                 const isNightCall = slotIdx >= 2;
-                                const yesterdayConflict = hasWardShiftYesterday && !isNightCall;
-                                const tomorrowConflict = hasWardShiftTomorrow && isNightCall; // Slot 3/4 ends at 2am/8am, Shift starts at 8am
+                                const yesterdayWardConflict = hasWardShiftYesterday && !isNightCall;
+                                const tomorrowWardConflict  = hasWardShiftTomorrow  && isNightCall;
 
-                                return !hasWardShiftToday && !yesterdayConflict && !tomorrowConflict && !hasOtherERToday;
+                                // NEW: ER-to-ER cross-day 12h rule
+                                const erCrossConflict = hasERConflictYesterday(candidate);
+
+                                return !hasWardShiftToday && !yesterdayWardConflict && !tomorrowWardConflict && !hasOtherERToday && !erCrossConflict;
                             })
                             .sort((a, b) => hoursMap[a] - hoursMap[b]);
 
-                        // Pass 2: Relaxed (No same-day conflict only)
+                        // Pass 2: Relaxed — keep ER cross-day rule but drop ward-rest rules
                         if (eligible.length === 0) {
                             eligible = poolArray
                                 .filter(candidate => {
@@ -436,8 +460,21 @@ export function useStaffingData() {
                                     if (cat.maleOnly && doc?.gender !== 'Male') return false;
 
                                     const hasWardShiftToday = wardShifts.some(s => s.day === day && s.doctorId === candidate);
-                                    const hasOtherERToday = newERShifts.some(s => s.day === day && s.doctorId === candidate);
-                                    return !hasWardShiftToday && !hasOtherERToday;
+                                    const hasOtherERToday   = newERShifts.some(s => s.day === day && s.doctorId === candidate);
+                                    const erCrossConflict   = hasERConflictYesterday(candidate);
+
+                                    return !hasWardShiftToday && !hasOtherERToday && !erCrossConflict;
+                                })
+                                .sort((a, b) => hoursMap[a] - hoursMap[b]);
+                        }
+
+                        // Pass 3: Last-resort fallback — only same-day conflicts blocked
+                        if (eligible.length === 0) {
+                            eligible = poolArray
+                                .filter(candidate => {
+                                    const doc = doctorMap.get(candidate);
+                                    if (cat.maleOnly && doc?.gender !== 'Male') return false;
+                                    return !newERShifts.some(s => s.day === day && s.doctorId === candidate);
                                 })
                                 .sort((a, b) => hoursMap[a] - hoursMap[b]);
                         }
@@ -507,12 +544,52 @@ export function useStaffingData() {
     try {
         let currentShifts = [...data.shifts];
         const periodAssignments = data.assignments.filter(a => a.period === period);
+
+        // Slot clock boundaries (hours from midnight, spanning into next calendar day)
+        const SLOT_START = [8, 14, 20, 26];  // 26 = 02:00 next day
+        const SLOT_END   = [14, 20, 26, 32]; // 32 = 08:00 next day
+
+        // Check whether assigning `shift` to `doctorId` would create a scheduling conflict
+        const canTakeShift = (doctorId: string, shift: ShiftRecord, shifts: ShiftRecord[]): boolean => {
+            const doctorShifts = shifts.filter(s => s.period === period && s.doctorId === doctorId && s.id !== shift.id);
+            const isNightER = (shift.slotIndex ?? 0) >= 2;
+            const shiftStart = SLOT_START[shift.slotIndex ?? 0] ?? 8;
+
+            for (const s of doctorShifts) {
+                // Absolute same-day conflict
+                if (s.day === shift.day) return false;
+
+                // ER-to-ER cross-day 12h rule (yesterday's ER vs today's slot)
+                if (s.wardId.startsWith('er-') && s.day === shift.day - 1) {
+                    const prevEnd = SLOT_END[s.slotIndex ?? 0] ?? 24;
+                    const gap = (shiftStart + 24) - prevEnd;
+                    if (gap < 12) return false;
+                }
+
+                // ER-to-ER cross-day 12h rule (today's ER vs tomorrow's slot)
+                if (s.wardId.startsWith('er-') && s.day === shift.day + 1) {
+                    const nextStart = SLOT_START[s.slotIndex ?? 0] ?? 8;
+                    const shiftEnd = SLOT_END[shift.slotIndex ?? 0] ?? 24;
+                    const gap = (nextStart + 24) - shiftEnd;
+                    if (gap < 12) return false;
+                }
+
+                // Ward-to-ER cross-day: morning ER (Slot 0/1) can't follow ward shift same evening
+                if (!s.wardId.startsWith('er-') && s.day === shift.day - 1 && !isNightER) return false;
+
+                // Ward-to-ER cross-day: night ER (Slot 2/3) can't precede ward shift next morning
+                if (!s.wardId.startsWith('er-') && s.day === shift.day + 1 && isNightER) return false;
+            }
+            return true;
+        };
+
         let iterations = 0;
-        const maxIterations = 50; // Safety cap
+        const maxIterations = 500;
 
         while (iterations < maxIterations) {
-            // 1. Calculate hours for ELIGIBLE doctors only
+            // Compute hours for all eligible (non-excluded) doctors
             const stats = data.doctors
+                .filter(d => d.id !== 'root')
                 .filter(d => {
                     const assignment = periodAssignments.find(a => a.doctorIds.includes(d.id));
                     return !assignment || !excludedWardIds.includes(assignment.wardId);
@@ -520,60 +597,63 @@ export function useStaffingData() {
                 .map(d => ({
                     id: d.id,
                     hours: calculateTotalHours(d.id, period, currentShifts)
-                })).sort((a, b) => b.hours - a.hours);
+                }))
+                .sort((a, b) => b.hours - a.hours);
 
-            if (stats.length < 2) break; // Need at least 2 people to balance
+            if (stats.length < 2) break;
 
-            const maxDoc = stats[0];
-            const minDoc = stats[stats.length - 1];
+            // Check if any pair still exceeds 12h gap
+            const maxHours = stats[0].hours;
+            const minHours = stats[stats.length - 1].hours;
+            if (maxHours - minHours <= 12) break;
 
-            if (maxDoc.hours - minDoc.hours <= 12) break;
+            // Try all pairs (high→low) until we find a movable ER shift
+            let moved = false;
+            outer:
+            for (let hi = 0; hi < stats.length; hi++) {
+                for (let lo = stats.length - 1; lo > hi; lo--) {
+                    const fromDoc = stats[hi];
+                    const toDoc   = stats[lo];
+                    if (fromDoc.hours - toDoc.hours <= 12) continue; // This pair is already balanced
 
-            // 2. Find an ER call to move
-            const erShifts = currentShifts.filter(s => s.period === period && s.doctorId === maxDoc.id && s.wardId.startsWith('er-'));
-            let swapped = false;
+                    // Collect ER shifts of the high-hour doctor, largest duration first
+                    const candidates = currentShifts
+                        .filter(s => s.period === period && s.doctorId === fromDoc.id && s.wardId.startsWith('er-'))
+                        .sort((a, b) => {
+                            // Prefer referrals (24h) then other ER (6h) — biggest impact first
+                            const dur = (s: ShiftRecord) => s.wardId === 'er-referral' ? 24 : 6;
+                            return dur(b) - dur(a);
+                        });
 
-            for (const shift of erShifts) {
-                const isConflict = currentShifts.some(s => {
-                    if (s.period !== period || s.doctorId !== minDoc.id) return false;
-                    
-                    // Same day check
-                    if (s.day === shift.day) return true;
-                    
-                    // 12h Gap Check (Shift 8am-8am, ER Night Call Relaxation)
-                    const isNightER = (shift.slotIndex || 0) >= 2;
-                    if (s.day === shift.day - 1 && !isNightER) return true; // Previous day ward shift vs Day ER Call
-                    if (s.day === shift.day + 1 && isNightER) return true; // Night ER Call vs Next day ward shift
-                    
-                    return false;
-                });
-
-                if (!isConflict) {
-                    currentShifts = currentShifts.map(s => s.id === shift.id ? { ...s, doctorId: minDoc.id } : s);
-                    swapped = true;
-                    break;
+                    for (const shift of candidates) {
+                        if (canTakeShift(toDoc.id, shift, currentShifts)) {
+                            currentShifts = currentShifts.map(s => s.id === shift.id ? { ...s, doctorId: toDoc.id } : s);
+                            moved = true;
+                            break outer;
+                        }
+                    }
                 }
             }
 
-            if (!swapped) break; // No possible swaps left
+            if (!moved) break; // Truly stuck — no valid move exists
             iterations++;
         }
 
-        await fetch('/api/shifts', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify(currentShifts) 
+        await fetch('/api/shifts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentShifts)
         });
-
         setData(prev => ({ ...prev, shifts: currentShifts }));
         return true;
-    } catch (e) { 
-        alert('Auto-balance failed.'); 
+    } catch (e) {
+        alert('Auto-balance failed.');
         return false;
-    } finally { 
-        setSyncing(false); 
+    } finally {
+        setSyncing(false);
     }
   }, [data, calculateTotalHours]);
+
 
   const batchUpdateHistory = useCallback(async (period: string, action: 'add' | 'remove') => {
     setSyncing(true);
