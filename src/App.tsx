@@ -1323,21 +1323,20 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
         });
 
         // 3. Conflicts
-        const conflicts: string[] = [];
+        const fatigueRisks: { shiftId: string; msg: string }[] = [];
         staffing.doctors.forEach((doc: Doctor) => {
             if (doc.id === 'root') return;
             const docShifts = periodShifts.filter((s: ShiftRecord) => s.doctorId === doc.id).sort((a: any, b: any) => a.day - b.day);
             const daysSeen = new Set();
             for (let i = 0; i < docShifts.length; i++) {
                 const s = docShifts[i];
-                if (daysSeen.has(s.day)) conflicts.push(`${doc.name} Day ${s.day} overlap`);
+                if (daysSeen.has(s.day)) fatigueRisks.push({ shiftId: s.id, msg: `${doc.name} Day ${s.day} overlap` });
                 daysSeen.add(s.day);
                 
-                // Only flag back-to-back if it's ER to Ward (Night Fatigue Rule)
                 if (i < docShifts.length - 1 && docShifts[i + 1].day === s.day + 1) {
                     const isNightER = s.wardId.startsWith('er-') && (s.slotIndex ?? 0) >= 2;
                     if (isNightER) {
-                        conflicts.push(`${doc.name} Fatigue: Night ER on Day ${s.day} vs Ward on Day ${s.day+1}`);
+                        fatigueRisks.push({ shiftId: s.id, msg: `${doc.name} Fatigue: Night ER on Day ${s.day}` });
                     }
                 }
             }
@@ -1350,7 +1349,7 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
         return [
             { id: 'gyne', label: 'Gynecology Female-Only Compliance', status: gyneViolations.length === 0 ? 'pass' : 'fail', detail: gyneViolations.length > 0 ? `Violations: ${gyneViolations.join(', ')}` : 'All Gynecology units are female-only compliant.' },
             { id: 'peds', label: 'Pediatric Gender Equilibrium', status: pedsViolations.length === 0 ? 'pass' : 'warn', detail: pedsViolations.length > 0 ? `Skewed: ${pedsViolations.join(', ')}` : 'Pediatric units maintain gender diversity.' },
-            { id: 'conflicts', label: 'Shift Overlap & Fatigue Audit', status: conflicts.length === 0 ? 'pass' : 'fail', detail: conflicts.length > 0 ? `Conflicts: ${conflicts.slice(0, 2).join('; ')}` : 'No conflicting or fatigue-risk shifts detected.' },
+            { id: 'conflicts', label: 'Shift Overlap & Fatigue Audit', status: fatigueRisks.length === 0 ? 'pass' : 'fail', detail: fatigueRisks.length > 0 ? `Detected: ${fatigueRisks.map(r => r.msg).slice(0, 2).join('; ')}` : 'No conflicting or fatigue-risk shifts detected.', actionId: fatigueRisks[0]?.shiftId },
             { id: 'assigned', label: 'Personnel Dispatch Coverage', status: unassignedCount === 0 ? 'pass' : 'warn', detail: unassignedCount > 0 ? `${unassignedCount} physicians remain unassigned.` : 'Full clinical staff deployment achieved.' }
         ];
     }, [staffing.doctors, staffing.wards, staffing.assignments, staffing.shifts, staffing.doctorMap, targetPeriod]);
@@ -1553,6 +1552,14 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                                     <CircleX className="w-4 h-4 text-red-500" />}
                                         </div>
                                         <p className="text-[10px] text-slate-500 leading-relaxed italic">{check.detail}</p>
+                                        {check.actionId && (
+                                            <button 
+                                                onClick={() => staffing.resolveFatigueConflict(targetPeriod, check.actionId)}
+                                                className="mt-3 px-3 py-1.5 bg-blue-600 text-white text-[9px] font-bold uppercase tracking-wider rounded-lg hover:bg-blue-500 transition-all flex items-center gap-2 shadow-lg shadow-blue-600/20"
+                                            >
+                                                <Zap className="w-3 h-3" /> Smart Resolve Conflict
+                                            </button>
+                                        )}
                                     </div>
                                 ))}
                             </div>

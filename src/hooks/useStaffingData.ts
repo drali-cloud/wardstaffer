@@ -707,12 +707,15 @@ export function useStaffingData() {
             }
         }
 
-        await fetch('/api/shifts/batch', { 
+        await fetch('/api/shifts', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify(currentShifts.filter(s => s.period === period)) 
         });
+
         setData(prev => ({ ...prev, shifts: currentShifts }));
+        await addLog('auto_balance', `Global workload balance executed. Variance optimized.`, period);
+        alert('Workload balanced and saved successfully.');
         return true;
     } catch (e) {
         console.error('Auto-balance failed:', e);
@@ -838,5 +841,45 @@ export function useStaffingData() {
     } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
   }, [data.shifts, doctorMap, wardMap, addLog]);
 
-  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory };
+  const resolveFatigueConflict = useCallback(async (period: string, shiftId: string) => {
+    setSyncing(true);
+    try {
+        const shiftA = data.shifts.find(s => s.id === shiftId);
+        if (!shiftA) return;
+        const docA = shiftA.doctorId;
+        let currentShifts = [...data.shifts];
+
+        const candidates = currentShifts.filter(s => 
+            s.period === period && 
+            s.wardId.startsWith('er-') && 
+            s.doctorId !== docA && 
+            s.day !== shiftA.day
+        );
+
+        for (const shiftB of candidates) {
+            const docB = shiftB.doctorId;
+            const checkSafe24h = (dId: string, day: number, excludeId: string) => {
+                return !currentShifts.some(s => 
+                    s.period === period && 
+                    s.doctorId === dId && 
+                    s.id !== excludeId &&
+                    Math.abs(s.day - day) <= 1
+                );
+            };
+
+            if (checkSafe24h(docA, shiftB.day, shiftA.id) && checkSafe24h(docB, shiftA.day, shiftB.id)) {
+                const newS1 = { ...shiftA, doctorId: docB };
+                const newS2 = { ...shiftB, doctorId: docA };
+                await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([newS1, newS2]) });
+                setData(prev => ({ ...prev, shifts: prev.shifts.map(s => s.id === shiftA.id ? newS1 : s.id === shiftB.id ? newS2 : s) }));
+                await addLog('auto_resolve', `Resolved fatigue for ${doctorMap.get(docA)?.name} by swapping with ${doctorMap.get(docB)?.name}`, period);
+                alert('Fatigue resolved with 24h safety margin.');
+                return;
+            }
+        }
+        alert('No 24h safe swap candidates found.');
+    } catch (e) { console.error(e); } finally { setSyncing(false); }
+  }, [data.shifts, doctorMap, addLog]);
+
+  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict };
 }
