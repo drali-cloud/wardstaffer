@@ -508,16 +508,28 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [targetPeriod, setTargetPeriod] = useState(currentMonth);
   const [showEquityResults, setShowEquityResults] = useState(false);
+  const [excludedWardIds, setExcludedWardIds] = useState<string[]>([]);
+  const [showExclusionDrop, setShowExclusionDrop] = useState(false);
+
   const myAssignment = staffing.assignments.filter((a: any) => a.doctorIds.includes(user.id)).sort((a: any, b: any) => b.period.localeCompare(a.period))[0];
   const isAdmin = user.role === 'admin';
 
   const sortedByHours = useMemo(() => {
     if (!isAdmin) return [];
-    return staffing.doctors.map((d: Doctor) => ({
-        ...d,
-        totalHours: staffing.calculateTotalHours(d.id, targetPeriod)
-    })).sort((a: any, b: any) => b.totalHours - a.totalHours);
-  }, [staffing.doctors, targetPeriod, isAdmin, staffing.calculateTotalHours]);
+    
+    // Get all assignments for this period to find primary wards
+    const periodAssignments = staffing.assignments.filter((a: any) => a.period === targetPeriod);
+    
+    return staffing.doctors
+        .filter((d: Doctor) => {
+            const assignment = periodAssignments.find((a: any) => a.doctorIds.includes(d.id));
+            return !assignment || !excludedWardIds.includes(assignment.wardId);
+        })
+        .map((d: Doctor) => ({
+            ...d,
+            totalHours: staffing.calculateTotalHours(d.id, targetPeriod)
+        })).sort((a: any, b: any) => b.totalHours - a.totalHours);
+  }, [staffing.doctors, targetPeriod, isAdmin, staffing.calculateTotalHours, excludedWardIds, staffing.assignments]);
 
   const topPerformer = sortedByHours[0];
   const lowPerformer = sortedByHours[sortedByHours.length - 1];
@@ -533,6 +545,51 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
           <div className="space-y-6">
               <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm relative overflow-hidden group">
                   <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:scale-110 transition-all"><Scale className="w-48 h-48 text-slate-900" /></div>
+                  
+                  {/* Exclusion Dropdown */}
+                  <div className="absolute top-6 right-6 z-30">
+                      <div className="relative">
+                          <button 
+                            onClick={() => setShowExclusionDrop(!showExclusionDrop)}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-bold uppercase text-slate-500 hover:bg-white hover:text-blue-600 transition-all"
+                          >
+                              <Shield className="w-3.5 h-3.5" />
+                              Exclude Wards ({excludedWardIds.length})
+                          </button>
+                          
+                          {showExclusionDrop && (
+                              <>
+                                  <div className="fixed inset-0 z-10" onClick={() => setShowExclusionDrop(false)} />
+                                  <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-2xl z-20 p-4 max-h-[300px] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+                                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Select Exempt Units</span>
+                                          <button onClick={() => setExcludedWardIds([])} className="text-[8px] font-bold text-blue-600 uppercase">Clear All</button>
+                                      </div>
+                                      <div className="space-y-1">
+                                          {staffing.wards.map((w: Ward) => (
+                                              <label key={w.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors group/item">
+                                                  <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${excludedWardIds.includes(w.id) ? 'bg-blue-600 border-blue-600' : 'border-slate-300 bg-white group-hover/item:border-blue-400'}`}>
+                                                      {excludedWardIds.includes(w.id) && <Check className="w-2.5 h-2.5 text-white" />}
+                                                  </div>
+                                                  <input 
+                                                      type="checkbox" 
+                                                      className="hidden" 
+                                                      checked={excludedWardIds.includes(w.id)} 
+                                                      onChange={(e) => {
+                                                          if (e.target.checked) setExcludedWardIds([...excludedWardIds, w.id]);
+                                                          else setExcludedWardIds(excludedWardIds.filter(id => id !== w.id));
+                                                      }} 
+                                                  />
+                                                  <span className={`text-[11px] font-bold ${excludedWardIds.includes(w.id) ? 'text-slate-900' : 'text-slate-500'}`}>{w.name}</span>
+                                              </label>
+                                          ))}
+                                      </div>
+                                  </div>
+                              </>
+                          )}
+                      </div>
+                  </div>
+
                   <div className="relative z-10">
                       <div className="flex items-center gap-4 mb-6">
                           <div className="bg-slate-900 p-3 rounded-2xl text-white shadow-lg shadow-slate-900/20"><Activity className="w-6 h-6" /></div>
@@ -568,7 +625,7 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
                                   <div className="flex flex-wrap gap-3">
                                       {(topPerformer.totalHours - lowPerformer.totalHours) > 12 ? (
                                           <button 
-                                              onClick={() => { if(confirm(`Variance is ${topPerformer.totalHours - lowPerformer.totalHours}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod); }}
+                                              onClick={() => { if(confirm(`Variance is ${topPerformer.totalHours - lowPerformer.totalHours}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod, excludedWardIds); }}
                                               className="bg-amber-600 text-white px-6 py-3 rounded-xl text-[10px] font-bold uppercase hover:bg-amber-700 transition-all shadow-lg shadow-amber-600/20 flex items-center gap-2"
                                           >
                                               <RefreshCw className={`w-3.5 h-3.5 ${staffing.syncing ? 'animate-spin' : ''}`} />
@@ -813,13 +870,12 @@ const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUse
 const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect, onNavigate }: { staffing: any, user: AuthUser, selectedPeriod: string | null, onSelect: (m: string | null) => void, onNavigate: (id: string) => void }) => {
     const isAdmin = user.role === 'admin';
     const periods = useMemo(() => [...new Set(staffing.assignments.map((a: Assignment) => a.period))].sort((a, b) => b.localeCompare(a)), [staffing.assignments]);
-    const [viewMode, setViewMode] = useState<'dispatch' | 'roster'>('dispatch');
+    const [viewMode, setViewMode] = useState<'dispatch' | 'ward' | 'er'>('dispatch');
 
     const handleExportExcel = (type: 'ward' | 'er') => {
         if (!selectedPeriod) return;
         const shifts = staffing.shifts.filter((s: ShiftRecord) => s.period === selectedPeriod && (type === 'er' ? s.wardId.startsWith('er-') : !s.wardId.startsWith('er-')));
         if (shifts.length === 0) { alert('No data to export.'); return; }
-        
         const grid: any[] = [];
         shifts.sort((a: any, b: any) => a.day - b.day).forEach((s: any) => {
             grid.push({
@@ -867,65 +923,105 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect, onNaviga
     const wardShifts = periodShifts.filter(s => !s.wardId.startsWith('er-'));
     const erShifts = periodShifts.filter(s => s.wardId.startsWith('er-'));
 
+    const [year, month] = selectedPeriod.split('-').map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const firstDayIdx = new Date(year, month - 1, 1).getDay();
+
     return (
         <div className="space-y-6 pb-24">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                     <button onClick={() => onSelect(null)} className="p-2 hover:bg-slate-50 rounded-xl border border-slate-200"><ChevronLeft className="w-5 h-5" /></button>
                     <div>
-                        <h2 className="text-xl font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(selectedPeriod + '-02'))}</h2>
-                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Archived Operational Data</p>
+                        <h2 className="text-lg md:text-xl font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(selectedPeriod + '-02'))}</h2>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[8px] md:text-[9px] text-slate-400 uppercase font-bold tracking-widest">Archived Rotation</span>
+                            <div className="h-1 w-1 rounded-full bg-slate-300" />
+                            <span className="text-[8px] md:text-[9px] text-blue-600 uppercase font-bold tracking-widest">{selectedPeriod}</span>
+                        </div>
                     </div>
                 </div>
+                
+                <div className="flex bg-slate-100 p-1 rounded-xl">
+                    {(['dispatch', 'ward', 'er'] as const).map(mode => (
+                        <button 
+                            key={mode} 
+                            onClick={() => setViewMode(mode)}
+                            className={`px-4 py-2 text-[9px] md:text-[10px] font-bold uppercase rounded-lg transition-all ${viewMode === mode ? 'bg-white text-blue-600 shadow-md shadow-blue-600/5' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                            {mode} Log
+                        </button>
+                    ))}
+                </div>
+
                 {isAdmin && (
-                    <div className="flex flex-wrap gap-2">
-                        <button onClick={() => handleExportExcel('ward')} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-all"><Download className="w-3.5 h-3.5" /> Ward Excel</button>
-                        <button onClick={() => handleExportExcel('er')} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2 rounded-xl hover:bg-amber-700 transition-all"><Download className="w-3.5 h-3.5" /> ER Excel</button>
-                        <button onClick={() => { if(confirm('Permanently delete ALL ER CALLS for this period?')) staffing.clearRosterByPeriod(selectedPeriod, true); }} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl hover:bg-red-100 transition-all"><Trash2 className="w-3.5 h-3.5" /> Delete ER</button>
+                    <div className="flex gap-2">
+                        <button onClick={() => handleExportExcel(viewMode === 'er' ? 'er' : 'ward')} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20"><Download className="w-3.5 h-3.5" /> Export {viewMode.toUpperCase()}</button>
+                        {viewMode !== 'dispatch' && (
+                            <button 
+                                onClick={() => staffing.clearRosterByPeriod(selectedPeriod, viewMode)}
+                                className="flex items-center gap-2 text-[10px] font-bold uppercase bg-amber-50 text-amber-600 border border-amber-100 px-4 py-2 rounded-xl hover:bg-amber-100 transition-all"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" /> Purge {viewMode.toUpperCase()}
+                            </button>
+                        )}
+                        <button 
+                            onClick={() => { if(confirm(`EXTREME DANGER: Permanently delete ALL records (Personnel Pool AND Rosters) for ${selectedPeriod}?`)) { staffing.deleteDispatchByPeriod(selectedPeriod); onSelect(null); } }}
+                            className="flex items-center gap-2 text-[10px] font-bold uppercase bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl hover:bg-red-100 transition-all"
+                        >
+                            <Lock className="w-3.5 h-3.5" /> Delete Full Month
+                        </button>
                     </div>
                 )}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2"><ClipboardList className="w-4 h-4 text-blue-600" /><h3 className="text-xs font-bold uppercase tracking-widest">Ward Shift Log</h3></div>
-                    <div className="max-h-[500px] overflow-y-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-white sticky top-0 z-10"><tr className="text-[10px] uppercase text-slate-400 font-bold border-b border-slate-100"><th className="p-4">Day</th><th className="p-4">Ward</th><th className="p-4">Personnel</th></tr></thead>
-                            <tbody className="divide-y divide-slate-50">
-                                {wardShifts.length > 0 ? wardShifts.sort((a,b)=>a.day-b.day).map((s: ShiftRecord) => (
-                                    <tr key={s.id} className="hover:bg-slate-50 transition-colors text-[11px] font-medium">
-                                        <td className="p-4 font-bold text-slate-400">{s.day}</td>
-                                        <td className="p-4 text-blue-600">{staffing.wardMap.get(s.wardId)?.name}</td>
-                                        <td className="p-4 text-slate-800 font-bold hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(s.doctorId)}>{staffing.doctorMap.get(s.doctorId)?.name}</td>
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden min-h-[600px]">
+                {viewMode === 'dispatch' ? (
+                    <div className="p-6">
+                        <table className="technical-grid w-full">
+                            <thead><tr className="bg-slate-50/50"><th className="col-header">Ward Unit</th><th className="col-header">Personnel Pool</th></tr></thead>
+                            <tbody className="text-sm divide-y divide-slate-100">
+                                {periodAssignments.map((a: Assignment) => (
+                                    <tr key={a.id}>
+                                        <td className="px-6 py-4 font-bold text-slate-700">{staffing.wardMap.get(a.wardId)?.name}</td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex flex-wrap gap-2">
+                                                {a.doctorIds.map(id => (
+                                                    <span key={id} onClick={() => onNavigate(id)} className="px-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 uppercase hover:border-blue-400 hover:text-blue-600 cursor-pointer transition-all">
+                                                        {staffing.doctorMap.get(id)?.name}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </td>
                                     </tr>
-                                )) : (
-                                    <tr><td colSpan={3} className="p-12 text-center text-slate-400 italic">No ward shifts recorded.</td></tr>
-                                )}
+                                ))}
+                                {periodAssignments.length === 0 && <tr><td colSpan={2} className="p-20 text-center text-slate-400 italic">No dispatch records found.</td></tr>}
                             </tbody>
                         </table>
                     </div>
-                </div>
-
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2"><Activity className="w-4 h-4 text-amber-600" /><h3 className="text-xs font-bold uppercase tracking-widest">ER Call Log</h3></div>
-                    <div className="max-h-[500px] overflow-y-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-white sticky top-0 z-10"><tr className="text-[10px] uppercase text-slate-400 font-bold border-b border-slate-100"><th className="p-4">Day</th><th className="p-4">Dept</th><th className="p-4">Personnel</th></tr></thead>
-                            <tbody className="divide-y divide-slate-50">
-                                {erShifts.length > 0 ? erShifts.sort((a,b)=>a.day-b.day).map((s: ShiftRecord) => (
-                                    <tr key={s.id} className="hover:bg-slate-50 transition-colors text-[11px] font-medium">
-                                        <td className="p-4 font-bold text-slate-400">{s.day}</td>
-                                        <td className="p-4 text-amber-600">{s.wardId === 'er-referral' ? 'REFERRAL' : s.wardId.replace('er-', '').toUpperCase()}</td>
-                                        <td className="p-4 text-slate-800 font-bold hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(s.doctorId)}>{staffing.doctorMap.get(s.doctorId)?.name}</td>
-                                    </tr>
-                                )) : (
-                                    <tr><td colSpan={3} className="p-12 text-center text-slate-400 italic">No ER calls recorded.</td></tr>
-                                )}
-                            </tbody>
-                        </table>
+                ) : (
+                    <div className="grid grid-cols-7 gap-px bg-slate-200 overflow-hidden">
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (<div key={d} className="bg-slate-50 p-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200">{d}</div>))}
+                        {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`e-${i}`} className="bg-slate-50/50 min-h-[120px]" />)}
+                        {Array.from({ length: daysInMonth }).map((_, i) => {
+                            const day = i + 1;
+                            const dayShifts = (viewMode === 'ward' ? wardShifts : erShifts).filter((s: ShiftRecord) => s.day === day);
+                            return (
+                                <div key={day} className="bg-white p-3 min-h-[120px] border-b border-r border-slate-100 group relative hover:bg-slate-50/50 transition-colors">
+                                    <span className="text-xs font-bold text-slate-300 group-hover:text-blue-600 transition-colors">{day}</span>
+                                    <div className="mt-2 space-y-1.5">
+                                        {dayShifts.map(s => (
+                                            <div key={s.id} onClick={() => onNavigate(s.doctorId)} className={`p-1.5 rounded-lg border text-[9px] font-bold truncate cursor-pointer transition-all ${viewMode === 'er' ? 'bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100' : 'bg-blue-50 border-blue-100 text-blue-700 hover:bg-blue-100'}`}>
+                                                {staffing.doctorMap.get(s.doctorId)?.name}
+                                                <span className="block text-[7px] opacity-60 uppercase mt-0.5">{viewMode === 'ward' ? staffing.wardMap.get(s.wardId)?.name : (s.wardId === 'er-referral' ? 'Referral' : s.wardId.replace('er-', '').toUpperCase())}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
-                </div>
+                )}
             </div>
         </div>
     );

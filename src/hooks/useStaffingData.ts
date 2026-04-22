@@ -262,12 +262,20 @@ export function useStaffingData() {
       } catch (e) { alert('Roster calculation failed.'); } finally { setSyncing(false); }
   }, [data.assignments, data.wards, wardMap]);
 
-  const clearRosterByPeriod = useCallback(async (period: string) => {
+  const clearRosterByPeriod = useCallback(async (period: string, type: 'all' | 'er' | 'ward' = 'all') => {
+    if (!confirm(`Are you sure you want to delete ${type === 'all' ? 'ALL' : type.toUpperCase()} shifts for ${period}?`)) return;
     setSyncing(true);
     try {
-        await fetch('/api/shifts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ period }) });
-        setData(prev => ({ ...prev, shifts: prev.shifts.filter(s => s.period !== period) }));
-        alert(`Roster cleared for ${period}. Personnel pool remains intact.`);
+        await fetch('/api/shifts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ period, type }) });
+        setData(prev => ({ 
+            ...prev, 
+            shifts: prev.shifts.filter(s => {
+                if (s.period !== period) return true;
+                if (type === 'er') return !s.wardId.startsWith('er-');
+                if (type === 'ward') return s.wardId.startsWith('er-');
+                return false; 
+            })
+        }));
     } catch (e) { alert('Clear failed.'); } finally { setSyncing(false); }
   }, []);
 
@@ -462,19 +470,27 @@ export function useStaffingData() {
     } catch (e) { alert('Manual assignment failed.'); } finally { setSyncing(false); }
   }, [data]);
 
-  const autoBalanceWorkload = useCallback(async (period: string) => {
+  const autoBalanceWorkload = useCallback(async (period: string, excludedWardIds: string[] = []) => {
     setSyncing(true);
     try {
         let currentShifts = [...data.shifts];
+        const periodAssignments = data.assignments.filter(a => a.period === period);
         let iterations = 0;
         const maxIterations = 50; // Safety cap
 
         while (iterations < maxIterations) {
-            // 1. Calculate hours
-            const stats = data.doctors.map(d => ({
-                id: d.id,
-                hours: calculateTotalHours(d.id, period, currentShifts) // Pass currentShifts to calculate correctly
-            })).sort((a, b) => b.hours - a.hours);
+            // 1. Calculate hours for ELIGIBLE doctors only
+            const stats = data.doctors
+                .filter(d => {
+                    const assignment = periodAssignments.find(a => a.doctorIds.includes(d.id));
+                    return !assignment || !excludedWardIds.includes(assignment.wardId);
+                })
+                .map(d => ({
+                    id: d.id,
+                    hours: calculateTotalHours(d.id, period, currentShifts)
+                })).sort((a, b) => b.hours - a.hours);
+
+            if (stats.length < 2) break; // Need at least 2 people to balance
 
             const maxDoc = stats[0];
             const minDoc = stats[stats.length - 1];
@@ -486,9 +502,7 @@ export function useStaffingData() {
             let swapped = false;
 
             for (const shift of erShifts) {
-                // Check if minDoc is free on this day/slot
                 const isConflict = currentShifts.some(s => s.period === period && s.doctorId === minDoc.id && s.day === shift.day);
-                
                 if (!isConflict) {
                     currentShifts = currentShifts.map(s => s.id === shift.id ? { ...s, doctorId: minDoc.id } : s);
                     swapped = true;
