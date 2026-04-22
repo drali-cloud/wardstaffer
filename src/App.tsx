@@ -530,23 +530,61 @@ const DashboardView = React.memo(({ staffing, user }: { staffing: any, user: Aut
       
       {isAdmin && sortedByHours.length > 0 && (
           <div className="space-y-6">
-              <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                  <div className="flex items-center gap-3">
-                      <div className="bg-blue-50 p-2 rounded-xl text-blue-600"><Scale className="w-5 h-5" /></div>
-                      <div>
-                          <h3 className="text-sm font-bold text-slate-800">Operational Equity Monitor</h3>
-                          <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Variance Analysis: {topPerformer.totalHours - lowPerformer.totalHours} Weighted Hours</p>
+              <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:scale-110 transition-all"><Scale className="w-48 h-48 text-slate-900" /></div>
+                  <div className="relative z-10">
+                      <div className="flex items-center gap-4 mb-6">
+                          <div className="bg-slate-900 p-3 rounded-2xl text-white shadow-lg shadow-slate-900/20"><Activity className="w-6 h-6" /></div>
+                          <div>
+                              <h3 className="text-xl font-bold text-slate-800">Operational Equity Command</h3>
+                              <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Personnel Workload Balancing Engine</p>
+                          </div>
                       </div>
+                      
+                      {!showEquityResults ? (
+                          <div className="space-y-4">
+                              <p className="text-sm text-slate-500 max-w-md">Analyze the current clinical rotation to identify workload disparities and ensure equitable duty distribution across all departments.</p>
+                              <button 
+                                  onClick={() => setShowEquityResults(true)}
+                                  className="bg-blue-600 text-white px-8 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/20 active:scale-95"
+                              >
+                                  Run Departmental Equity Audit
+                              </button>
+                          </div>
+                      ) : (
+                          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                                  <div>
+                                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Audit Result</p>
+                                      <div className="flex items-center gap-3">
+                                          <div className={`text-3xl font-black ${(topPerformer.totalHours - lowPerformer.totalHours) > 12 ? 'text-amber-600' : 'text-green-600'}`}>
+                                              {topPerformer.totalHours - lowPerformer.totalHours}h
+                                          </div>
+                                          <div className="text-[10px] font-bold text-slate-500 uppercase leading-tight">Workload<br/>Variance</div>
+                                      </div>
+                                  </div>
+                                  
+                                  <div className="flex flex-wrap gap-3">
+                                      {(topPerformer.totalHours - lowPerformer.totalHours) > 12 ? (
+                                          <button 
+                                              onClick={() => { if(confirm(`Variance is ${topPerformer.totalHours - lowPerformer.totalHours}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod); }}
+                                              className="bg-amber-600 text-white px-6 py-3 rounded-xl text-[10px] font-bold uppercase hover:bg-amber-700 transition-all shadow-lg shadow-amber-600/20 flex items-center gap-2"
+                                          >
+                                              <RefreshCw className={`w-3.5 h-3.5 ${staffing.syncing ? 'animate-spin' : ''}`} />
+                                              Execute Auto-Balance
+                                          </button>
+                                      ) : (
+                                          <div className="flex items-center gap-2 px-6 py-3 bg-green-100 text-green-700 rounded-xl text-[10px] font-bold uppercase">
+                                              <CheckCircle className="w-3.5 h-3.5" />
+                                              Distribution Optimal
+                                          </div>
+                                      )}
+                                      <button onClick={() => setShowEquityResults(false)} className="px-6 py-3 border border-slate-200 text-slate-400 rounded-xl text-[10px] font-bold uppercase hover:bg-white hover:text-slate-600 transition-all">Dismiss</button>
+                                  </div>
+                              </div>
+                          </div>
+                      )}
                   </div>
-                  {(topPerformer.totalHours - lowPerformer.totalHours) > 12 && (
-                      <button 
-                          onClick={() => { if(confirm(`Variance is ${topPerformer.totalHours - lowPerformer.totalHours}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod); }}
-                          className="flex items-center gap-2 bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-slate-800 transition-all shadow-lg"
-                      >
-                          <RefreshCw className={`w-3 h-3 ${staffing.syncing ? 'animate-spin' : ''}`} />
-                          Auto-Balance Workload
-                      </button>
-                  )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -771,130 +809,72 @@ const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUse
     );
 });
 
-const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staffing: any, user: AuthUser, selectedPeriod: string | null, onSelect: (m: string | null) => void }) => {
-    const [viewMode, setViewMode] = useState<'dispatch' | 'roster'>('dispatch');
+const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect, onNavigate }: { staffing: any, user: AuthUser, selectedPeriod: string | null, onSelect: (m: string | null) => void, onNavigate: (id: string) => void }) => {
+    const isAdmin = user.role === 'admin';
     const periods = useMemo(() => [...new Set(staffing.assignments.map((a: Assignment) => a.period))].sort((a, b) => b.localeCompare(a)), [staffing.assignments]);
-    if (selectedPeriod) {
-        const periodAssignments = staffing.assignments.filter((a: Assignment) => a.period === selectedPeriod);
-        const periodShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === selectedPeriod);
-        
-        // Drag and Drop State
-        const [dragSource, setDragSource] = useState<{ type: 'dispatch' | 'roster', wardId: string, doctorId: string, shiftId?: string } | null>(null);
+    const [viewMode, setViewMode] = useState<'dispatch' | 'roster'>('dispatch');
 
-        const handleExportDispatch = () => {
-            const gridRows: any[] = [];
-            let maxDocs = 0; const wardToDocs: Record<string, string[]> = {};
-            staffing.wards.forEach(w => {
-                const assignment = periodAssignments.find(a => a.wardId === w.id);
-                const docNames = (assignment?.doctorIds || []).map(id => staffing.doctorMap.get(id)?.name || 'Unknown');
-                wardToDocs[w.name] = docNames; maxDocs = Math.max(maxDocs, docNames.length);
+    const handleExportExcel = (type: 'ward' | 'er') => {
+        if (!selectedPeriod) return;
+        const shifts = staffing.shifts.filter((s: ShiftRecord) => s.period === selectedPeriod && (type === 'er' ? s.wardId.startsWith('er-') : !s.wardId.startsWith('er-')));
+        if (shifts.length === 0) { alert('No data to export.'); return; }
+        
+        const grid: any[] = [];
+        shifts.sort((a: any, b: any) => a.day - b.day).forEach((s: any) => {
+            grid.push({
+                Day: s.day,
+                Unit: s.wardId.startsWith('er-') ? (s.wardId === 'er-referral' ? 'REFERRAL' : s.wardId.replace('er-', '').toUpperCase()) : (staffing.wardMap.get(s.wardId)?.name || s.wardId),
+                Personnel: staffing.doctorMap.get(s.doctorId)?.name || 'Unknown',
+                Role: s.wardId.startsWith('er-') ? 'ER Call' : 'Ward Duty'
             });
-            for (let i = 0; i < maxDocs; i++) {
-                const row: any = { 'Month': i === 0 ? selectedPeriod : '' };
-                staffing.wards.forEach(w => { row[w.name] = wardToDocs[w.name][i] || ''; });
-                gridRows.push(row);
-            }
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(gridRows), "Monthly Dispatch");
-            XLSX.writeFile(wb, `Dispatch_${selectedPeriod}.xlsx`);
-        };
-        const handleExportRoster = () => {
-            if (periodShifts.length === 0) { alert('Generate roster first.'); return; }
-            const wb = XLSX.utils.book_new();
-            const days = [...new Set(periodShifts.map(s => s.day))].sort((a,b)=>a-b);
-            const grid: any[] = [];
-            days.forEach(day => {
-                const dayShifts = periodShifts.filter(s => s.day === day);
-                staffing.wards.forEach(w => {
-                    const wardShifts = dayShifts.filter(s => s.day === day && s.wardId === w.id);
-                    if (wardShifts.length > 0) {
-                        grid.push({ 
-                            Date: `${selectedPeriod}-${day}`, 
-                            Ward: w.name, 
-                            Staff: wardShifts.map(s => staffing.doctorMap.get(s.doctorId)?.name).join(', '),
-                            'Shift Pattern': `${w.requirements.staffPerShift} Doc / ${w.requirements.shiftDuration}`
-                        });
-                    }
-                });
-            });
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grid), "Daily Roster");
-            XLSX.writeFile(wb, `Daily_Roster_${selectedPeriod}.xlsx`);
-        };
+        });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grid), `${type.toUpperCase()} Log`);
+        XLSX.writeFile(wb, `${type.toUpperCase()}_Log_${selectedPeriod}.xlsx`);
+    };
+
+    if (!selectedPeriod) {
         return (
             <div className="space-y-6">
-                <div className="flex justify-between items-center"><div className="flex items-center gap-4"><button onClick={() => onSelect(null)} className="flex items-center text-xs font-bold text-blue-600 uppercase tracking-widest"><ChevronLeft className="w-4 h-4" /> Archive</button><div className="h-4 w-[1px] bg-slate-200"></div><div className="flex bg-slate-100 p-1 rounded-lg"><button onClick={() => setViewMode('dispatch')} className={`px-4 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewMode === 'dispatch' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>Dispatch Pool</button><button onClick={() => setViewMode('roster')} className={`px-4 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewMode === 'roster' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>Daily Roster</button></div></div><div className="flex gap-2">{user.role === 'admin' && viewMode === 'roster' && (<><button onClick={() => staffing.calculateDailyRoster(selectedPeriod)} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20"><RefreshCw className="w-3.5 h-3.5" /> Calculate Shifts</button><button onClick={() => { if(confirm('Purge only daily shifts? Personnel pool will stay.')) staffing.clearRosterByPeriod(selectedPeriod); }} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-red-50 text-red-600 px-4 py-2 rounded-lg hover:bg-red-100 transition-colors"><Trash2 className="w-3.5 h-3.5" /> Purge Roster</button></>)}<button onClick={handleExportDispatch} className="flex items-center gap-2 text-[10px] font-bold uppercase border border-blue-200 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 transition-colors"><Download className="w-3.5 h-3.5" /> Export Dispatch</button><button onClick={handleExportRoster} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-50 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-100 transition-colors"><ListChecks className="w-3.5 h-3.5" /> Export Roster</button></div></div>
-                <div className="technical-card overflow-hidden">{viewMode === 'dispatch' ? (
-                    <table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">Ward Unit</th><th className="col-header">Monthly Personnel Pool (Drag to swap)</th></tr></thead>
-                    <tbody className="text-sm divide-y divide-slate-100">
-                        {periodAssignments.map((a: Assignment) => (
-                            <tr key={a.id}><td className="px-6 py-4 font-semibold text-slate-800">{staffing.wardMap.get(a.wardId)?.name}</td><td className="px-6 py-4">
-                                <div className="flex flex-wrap gap-1">
-                                    {a.doctorIds.map(id => (
-                                        <span key={id} draggable={user.role === 'admin'} 
-                                            onDragStart={() => setDragSource({ type: 'dispatch', wardId: a.wardId, doctorId: id })}
-                                            onDragOver={e => e.preventDefault()}
-                                            onDrop={() => {
-                                                if (dragSource?.type === 'dispatch' && dragSource.doctorId !== id) {
-                                                    staffing.swapPoolDoctors(selectedPeriod, dragSource.wardId, dragSource.doctorId, a.wardId, id);
-                                                }
-                                                setDragSource(null);
-                                            }}
-                                            className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border cursor-move transition-all ${dragSource?.doctorId === id ? 'bg-blue-600 text-white border-blue-700 opacity-50' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400 hover:bg-blue-50'}`}>
-                                            {staffing.doctorMap.get(id)?.name}
-                                        </span>
-                                    ))}
-                                </div>
-                            </td></tr>
-                        ))}
-                    </tbody></table>
-                ) : (
-                    <div className="p-0">{periodShifts.length === 0 ? (
-                        <div className="p-20 text-center space-y-4"><Calendar className="w-12 h-12 text-slate-200 mx-auto" /><p className="text-slate-400 text-sm">No roster generated yet. Click <b>Calculate Shifts</b>.</p></div>
-                    ) : (
-                        <div className="max-h-[600px] overflow-auto"><table className="technical-grid border-separate border-spacing-0">
-                            <thead><tr className="bg-slate-50 sticky top-0 z-10 shadow-sm"><th className="col-header bg-slate-50">Day</th>{staffing.wards.map(w => (<th key={w.id} className="col-header bg-slate-50 border-l border-slate-100">{w.name}</th>))}</tr></thead>
-                            <tbody className="text-xs divide-y divide-slate-100">
-                                {[...new Set(periodShifts.map(s => s.day))].sort((a,b)=>a-b).map(day => (
-                                    <tr key={day} className="hover:bg-slate-50/50"><td className="px-4 py-3 font-bold text-blue-600 border-r border-slate-100 sticky left-0 bg-white z-20">Day {day}</td>
-                                    {staffing.wards.map(w => { 
-                                        const shifts = periodShifts.filter(s => s.day === day && s.wardId === w.id); 
-                                        return (
-                                            <td key={w.id} className="px-4 py-3 border-l border-slate-50">
-                                                <div className="space-y-2">
-                                                    {shifts.map(s => (
-                                                        <div key={s.id} draggable={user.role === 'admin'}
-                                                            onDragStart={() => setDragSource({ type: 'roster', wardId: w.id, doctorId: s.doctorId, shiftId: s.id })}
-                                                            onDragOver={e => e.preventDefault()}
-                                                            onDrop={() => {
-                                                                if (dragSource?.type === 'roster' && dragSource.shiftId !== s.id) {
-                                                                    staffing.swapShiftDoctors(selectedPeriod, dragSource.shiftId!, s.id);
-                                                                }
-                                                                setDragSource(null);
-                                                            }}
-                                                            className={`flex flex-col border-b border-slate-50 pb-1 last:border-0 cursor-move p-1 rounded transition-colors ${dragSource?.shiftId === s.id ? 'bg-blue-600/10 border-blue-200' : 'hover:bg-blue-50'}`}>
-                                                            <span className={`text-[10px] font-bold ${dragSource?.shiftId === s.id ? 'text-blue-600' : 'text-slate-800'}`}>{staffing.doctorMap.get(s.doctorId)?.name}</span>
-                                                            <span className="text-[8px] text-slate-400 uppercase font-bold">Slot {s.slotIndex + 1} ({w.requirements.shiftDuration})</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </td>
-                                        ); 
-                                    })}</tr>
-                                ))}
-                            </tbody>
-                        </table></div>
-                    )}</div>
-                )}</div>
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h2 className="text-xl font-bold text-slate-800">Operational Archives</h2>
+                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Select a rotation cycle to view logs</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {periods.length > 0 ? periods.map(p => (
+                        <div key={p} onClick={() => onSelect(p)} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer group">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="bg-blue-50 p-3 rounded-2xl text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all"><Archive className="w-6 h-6" /></div>
+                                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-600 transition-all" />
+                            </div>
+                            <h3 className="text-lg font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(p + '-02'))}</h3>
+                            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Rotation {p}</p>
+                        </div>
+                    )) : (
+                        <div className="col-span-full py-20 text-center bg-white rounded-3xl border border-slate-100 border-dashed">
+                            <Archive className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                            <p className="text-slate-400 text-sm italic">No archived rotations found yet.</p>
+                        </div>
+                    )}
+                </div>
             </div>
         );
     }
 
+    const periodAssignments = staffing.assignments.filter((a: Assignment) => a.period === selectedPeriod);
+    const periodShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === selectedPeriod);
+    const wardShifts = periodShifts.filter(s => !s.wardId.startsWith('er-'));
+    const erShifts = periodShifts.filter(s => s.wardId.startsWith('er-'));
+
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 pb-24">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                     <button onClick={() => onSelect(null)} className="p-2 hover:bg-slate-50 rounded-xl border border-slate-200"><ChevronLeft className="w-5 h-5" /></button>
-                    <div><h2 className="text-xl font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(selectedPeriod + '-01'))}</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Archived Operational Data</p></div>
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(selectedPeriod + '-02'))}</h2>
+                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Archived Operational Data</p>
+                    </div>
                 </div>
                 {isAdmin && (
                     <div className="flex flex-wrap gap-2">
@@ -912,13 +892,15 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staf
                         <table className="w-full text-left border-collapse">
                             <thead className="bg-white sticky top-0 z-10"><tr className="text-[10px] uppercase text-slate-400 font-bold border-b border-slate-100"><th className="p-4">Day</th><th className="p-4">Ward</th><th className="p-4">Personnel</th></tr></thead>
                             <tbody className="divide-y divide-slate-50">
-                                {wardShifts.sort((a,b)=>a.day-b.day).map((s: ShiftRecord) => (
+                                {wardShifts.length > 0 ? wardShifts.sort((a,b)=>a.day-b.day).map((s: ShiftRecord) => (
                                     <tr key={s.id} className="hover:bg-slate-50 transition-colors text-[11px] font-medium">
                                         <td className="p-4 font-bold text-slate-400">{s.day}</td>
                                         <td className="p-4 text-blue-600">{staffing.wardMap.get(s.wardId)?.name}</td>
-                                        <td className="p-4 text-slate-800 font-bold">{staffing.doctorMap.get(s.doctorId)?.name}</td>
+                                        <td className="p-4 text-slate-800 font-bold hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(s.doctorId)}>{staffing.doctorMap.get(s.doctorId)?.name}</td>
                                     </tr>
-                                ))}
+                                )) : (
+                                    <tr><td colSpan={3} className="p-12 text-center text-slate-400 italic">No ward shifts recorded.</td></tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -930,13 +912,15 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staf
                         <table className="w-full text-left border-collapse">
                             <thead className="bg-white sticky top-0 z-10"><tr className="text-[10px] uppercase text-slate-400 font-bold border-b border-slate-100"><th className="p-4">Day</th><th className="p-4">Dept</th><th className="p-4">Personnel</th></tr></thead>
                             <tbody className="divide-y divide-slate-50">
-                                {erShifts.sort((a,b)=>a.day-b.day).map((s: ShiftRecord) => (
+                                {erShifts.length > 0 ? erShifts.sort((a,b)=>a.day-b.day).map((s: ShiftRecord) => (
                                     <tr key={s.id} className="hover:bg-slate-50 transition-colors text-[11px] font-medium">
                                         <td className="p-4 font-bold text-slate-400">{s.day}</td>
                                         <td className="p-4 text-amber-600">{s.wardId === 'er-referral' ? 'REFERRAL' : s.wardId.replace('er-', '').toUpperCase()}</td>
-                                        <td className="p-4 text-slate-800 font-bold">{staffing.doctorMap.get(s.doctorId)?.name}</td>
+                                        <td className="p-4 text-slate-800 font-bold hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(s.doctorId)}>{staffing.doctorMap.get(s.doctorId)?.name}</td>
                                     </tr>
-                                ))}
+                                )) : (
+                                    <tr><td colSpan={3} className="p-12 text-center text-slate-400 italic">No ER calls recorded.</td></tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -944,7 +928,7 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect }: { staf
             </div>
         </div>
     );
-}
+};
 
 const AssignmentsView = React.memo(({ staffing }: { staffing: any }) => {
     return (<div className="space-y-6"><div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><h2 className="text-xl font-bold text-slate-800">Dispatch History</h2></div><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">Period</th><th className="col-header">Ward</th><th className="col-header">Personnel Pool</th></tr></thead><tbody className="text-sm divide-y divide-slate-100">{staffing.assignments.slice().reverse().map((a: Assignment) => (<tr key={a.id}><td className="px-6 py-4 text-[10px] font-mono text-blue-600 font-bold uppercase">{a.period}</td><td className="px-6 py-4 font-semibold text-slate-800">{staffing.wardMap.get(a.wardId)?.name}</td><td className="px-6 py-4"><div className="flex flex-wrap gap-1.5 font-mono text-[9px]">{a.doctorIds.map(id => (<span key={id} className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-bold uppercase">{staffing.doctorMap.get(id)?.name}</span>))}</div></td></tr>))}</tbody></table></div></div>);
