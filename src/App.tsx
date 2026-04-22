@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CircleCheck, Scale, History, RotateCcw, TriangleAlert, CircleX
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'motion';
 import { useStaffingData } from './hooks/useStaffingData';
 import { Doctor, Ward, Gender, Assignment, ShiftRecord, AuditLog } from './types';
 import * as XLSX from 'xlsx';
@@ -36,9 +36,15 @@ interface AuthUser {
 }
 
 export default function App() {
+  return <div style={{padding: '50px', background: 'blue', color: 'white', fontSize: '24px'}}>APP COMPONENT EXECUTED</div>;
   const [user, setUser] = useState<AuthUser | null>(() => {
-      const saved = localStorage.getItem('wardstaffer_user');
-      return saved ? JSON.parse(saved) : null;
+      try {
+          const saved = localStorage.getItem('wardstaffer_user');
+          return saved ? JSON.parse(saved) : null;
+      } catch (e) {
+          console.error('Failed to parse saved user:', e);
+          return null;
+      }
   });
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
@@ -1227,8 +1233,13 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
     const currentMonth = new Date().toISOString().slice(0, 7);
     const [targetPeriod, setTargetPeriod] = useState(currentMonth);
     const [excludedWardIds, setExcludedWardIds] = useState<string[]>(() => {
-        const saved = localStorage.getItem('wardstaffer_excluded_wards');
-        return saved ? JSON.parse(saved) : [];
+        try {
+            const saved = localStorage.getItem('wardstaffer_excluded_wards');
+            return saved ? JSON.parse(saved) : [];
+        } catch (e) {
+            console.error('Failed to parse excluded wards:', e);
+            return [];
+        }
     });
     const [showExclusionDrop, setShowExclusionDrop] = useState(false);
     const [showLogs, setShowLogs] = useState(false);
