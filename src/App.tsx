@@ -1324,19 +1324,34 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
 
         // 3. Conflicts
         const fatigueRisks: { shiftId: string; msg: string }[] = [];
+        const SLOT_START = [8, 14, 20, 26]; 
+        const SLOT_END   = [14, 20, 26, 32];
+        
         staffing.doctors.forEach((doc: Doctor) => {
             if (doc.id === 'root') return;
-            const docShifts = periodShifts.filter((s: ShiftRecord) => s.doctorId === doc.id).sort((a: any, b: any) => a.day - b.day);
-            const daysSeen = new Set();
+            const docShifts = periodShifts.filter((s: ShiftRecord) => s.doctorId === doc.id).sort((a: any, b: any) => a.day - b.day || (a.slotIndex ?? 0) - (b.slotIndex ?? 0));
+            
             for (let i = 0; i < docShifts.length; i++) {
-                const s = docShifts[i];
-                if (daysSeen.has(s.day)) fatigueRisks.push({ shiftId: s.id, msg: `${doc.name} Day ${s.day} overlap` });
-                daysSeen.add(s.day);
-                
-                if (i < docShifts.length - 1 && docShifts[i + 1].day === s.day + 1) {
-                    const isNightER = s.wardId.startsWith('er-') && (s.slotIndex ?? 0) >= 2;
-                    if (isNightER) {
-                        fatigueRisks.push({ shiftId: s.id, msg: `${doc.name} Fatigue: Night ER on Day ${s.day}` });
+                const s1 = docShifts[i];
+                if (i < docShifts.length - 1) {
+                    const s2 = docShifts[i + 1];
+                    
+                    let start1 = (s1.day - 1) * 24 + (SLOT_START[s1.slotIndex ?? 0] ?? 8);
+                    let end1 = (s1.day - 1) * 24 + (SLOT_END[s1.slotIndex ?? 0] ?? 24);
+                    if (!s1.wardId.startsWith('er-') && s1.slotIndex === undefined) {
+                        const ward = staffing.wardMap.get(s1.wardId);
+                        const duration = ward?.requirements?.shiftDuration === '6h' ? 6 : ward?.requirements?.shiftDuration === '12h' ? 12 : 24;
+                        end1 = start1 + duration;
+                    }
+
+                    let start2 = (s2.day - 1) * 24 + (SLOT_START[s2.slotIndex ?? 0] ?? 8);
+                    
+                    const gap = start2 - end1;
+                    if (gap < 12) {
+                        fatigueRisks.push({ 
+                            shiftId: s1.id, 
+                            msg: `${doc.name}: ${gap < 0 ? 'Overlap' : 'Fatigue (' + gap + 'h gap)'} Day ${s1.day}` 
+                        });
                     }
                 }
             }

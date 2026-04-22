@@ -856,30 +856,51 @@ export function useStaffingData() {
             s.day !== shiftA.day
         );
 
+        const SLOT_START = [8, 14, 20, 26]; 
+        const SLOT_END   = [14, 20, 26, 32];
+
+        const checkSafe12h = (dId: string, targetShift: ShiftRecord, excludeId: string) => {
+            let targetStart = (targetShift.day - 1) * 24 + (SLOT_START[targetShift.slotIndex ?? 0] ?? 8);
+            let targetEnd = (targetShift.day - 1) * 24 + (SLOT_END[targetShift.slotIndex ?? 0] ?? 24);
+
+            if (!targetShift.wardId.startsWith('er-') && targetShift.slotIndex === undefined) {
+                const ward = wardMap.get(targetShift.wardId);
+                const duration = ward?.requirements?.shiftDuration === '6h' ? 6 : ward?.requirements?.shiftDuration === '12h' ? 12 : 24;
+                targetEnd = targetStart + duration;
+            }
+
+            return !currentShifts.some(s => {
+                if (s.period !== period || s.doctorId !== dId || s.id === excludeId) return false;
+                
+                let sStart = (s.day - 1) * 24 + (SLOT_START[s.slotIndex ?? 0] ?? 8);
+                let sEnd = (s.day - 1) * 24 + (SLOT_END[s.slotIndex ?? 0] ?? 24);
+
+                if (!s.wardId.startsWith('er-') && s.slotIndex === undefined) {
+                    const ward = wardMap.get(s.wardId);
+                    const duration = ward?.requirements?.shiftDuration === '6h' ? 6 : ward?.requirements?.shiftDuration === '12h' ? 12 : 24;
+                    sEnd = sStart + duration;
+                }
+
+                const gap = Math.max(targetStart - sEnd, sStart - targetEnd);
+                return gap < 12;
+            });
+        };
+
         for (const shiftB of candidates) {
             const docB = shiftB.doctorId;
-            const checkSafe24h = (dId: string, day: number, excludeId: string) => {
-                return !currentShifts.some(s => 
-                    s.period === period && 
-                    s.doctorId === dId && 
-                    s.id !== excludeId &&
-                    Math.abs(s.day - day) <= 1
-                );
-            };
-
-            if (checkSafe24h(docA, shiftB.day, shiftA.id) && checkSafe24h(docB, shiftA.day, shiftB.id)) {
+            if (checkSafe12h(docA, shiftB, shiftA.id) && checkSafe12h(docB, shiftA, shiftB.id)) {
                 const newS1 = { ...shiftA, doctorId: docB };
                 const newS2 = { ...shiftB, doctorId: docA };
                 await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([newS1, newS2]) });
                 setData(prev => ({ ...prev, shifts: prev.shifts.map(s => s.id === shiftA.id ? newS1 : s.id === shiftB.id ? newS2 : s) }));
                 await addLog('auto_resolve', `Resolved fatigue for ${doctorMap.get(docA)?.name} by swapping with ${doctorMap.get(docB)?.name}`, period);
-                alert('Fatigue resolved with 24h safety margin.');
+                alert('Fatigue resolved with 12h safety margin.');
                 return;
             }
         }
-        alert('No 24h safe swap candidates found.');
+        alert('No 12h safe swap candidates found.');
     } catch (e) { console.error(e); } finally { setSyncing(false); }
-  }, [data.shifts, doctorMap, addLog]);
+  }, [data.shifts, doctorMap, wardMap, addLog]);
 
   return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict };
 }
