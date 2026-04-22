@@ -613,6 +613,21 @@ export function useStaffingData() {
     } catch (e) { alert('History update failed.'); } finally { setSyncing(false); }
   }, [data]);
 
+
+  const addLog = useCallback(async (action: string, details: string, period: string) => {
+    const newLog: AuditLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      timestamp: new Date().toISOString(),
+      action: action as any,
+      details,
+      period
+    };
+    try {
+        await fetch('/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLog) });
+        setData(prev => ({ ...prev, logs: [newLog, ...prev.logs] }));
+    } catch (e) { console.error('Log failure:', e); }
+  }, []);
+
   const optimizeReferralsForMales = useCallback(async (period: string) => {
     setSyncing(true);
     try {
@@ -637,23 +652,9 @@ export function useStaffingData() {
 
         await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentShifts) });
         setData(prev => ({ ...prev, shifts: currentShifts }));
-        await addLog('optimize_referrals', `Rearranged male referrals to equalize hours`, period);
+        await addLog('auto_balance', `Rearranged male referrals to equalize hours`, period);
     } catch (e) { alert('Referral optimization failed.'); } finally { setSyncing(false); }
   }, [data, calculateTotalHours, addLog]);
-
-  const addLog = useCallback(async (action: string, details: string, period: string) => {
-    const newLog: AuditLog = {
-      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      timestamp: new Date().toISOString(),
-      action: action as any,
-      details,
-      period
-    };
-    try {
-        await fetch('/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLog) });
-        setData(prev => ({ ...prev, logs: [newLog, ...prev.logs] }));
-    } catch (e) { console.error('Log failure:', e); }
-  }, []);
 
   const swapERCalls = useCallback(async (period: string, shiftA: ShiftRecord, shiftB: ShiftRecord) => {
     setSyncing(true);
