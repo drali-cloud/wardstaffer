@@ -176,10 +176,10 @@ export function useStaffingData() {
     return shiftsToUse
         .filter(s => s.doctorId === doctorId && (!period || s.period === period))
         .reduce((total, s) => {
-            if (s.wardId === 'er-referral') return total + 24;
-            if (s.wardId === 'er-men' || s.wardId === 'er-women') return total + 6;
-            if (s.wardId === 'er-pediatric') return total + 8;
-            if (s.wardId.startsWith('er-')) return total + 12; // Fallback for other ER
+            if (s.wardId.includes('referral')) return total + 24;
+            if (s.wardId.includes('men') || s.wardId.includes('women')) return total + 6;
+            if (s.wardId.includes('pediatric')) return total + 8;
+            if (s.wardId.startsWith('er-')) return total + 12; 
             
             // Use ward's actual configured shift duration (ICU/CCU may be 12h, not 24h)
             const ward = data.wards.find(w => w.id === s.wardId);
@@ -389,10 +389,10 @@ export function useStaffingData() {
         const newERShifts: ShiftRecord[] = [];
         
         const categories = [
+            { id: 'er-referral', name: 'Daily Referral', slots: [1], wards: [...config.men, ...config.women, ...config.pediatric], duration: 24, maleOnly: true },
             { id: 'er-men', name: 'Men', slots: [2, 4, 4, 2], wards: config.men, duration: 6 },
             { id: 'er-women', name: 'Women', slots: [2, 4, 4, 2], wards: config.women, duration: 6 },
-            { id: 'er-pediatric', name: 'Pediatric', slots: [1, 1, 1], wards: config.pediatric, duration: 8 },
-            { id: 'er-referral', name: 'Daily Referral', slots: [1], wards: [...config.men, ...config.women, ...config.pediatric], duration: 24, maleOnly: true }
+            { id: 'er-pediatric', name: 'Pediatric', slots: [1, 1, 1], wards: config.pediatric, duration: 8 }
         ];
 
         // Track cumulative hours per doctor for the period, starting with ward shifts
@@ -412,7 +412,6 @@ export function useStaffingData() {
                 const poolArray = Array.from(pool);
                 if (poolArray.length === 0) return;
 
-
                 cat.slots.forEach((staffCount, slotIdx) => {
                     for (let s = 0; s < staffCount; s++) {
 
@@ -426,7 +425,7 @@ export function useStaffingData() {
                         const hasERConflictYesterday = (candidate: string): boolean => {
                             return newERShifts.some(prev => {
                                 if (prev.day !== day - 1 || prev.doctorId !== candidate) return false;
-                                const prevEndHour = SLOT_END[prev.slotIndex] ?? 24;
+                                const prevEndHour = SLOT_END[prev.slotIndex ?? 0] ?? 24;
                                 const todayStartHour = SLOT_START[slotIdx] ?? 8;
                                 // prevEnd is already relative to yesterday; today's start is +24h from yesterday midnight
                                 // gap = (todayStartHour + 24) - prevEndHour
@@ -441,10 +440,10 @@ export function useStaffingData() {
                                 const doc = doctorMap.get(candidate);
                                 if (cat.maleOnly && doc?.gender !== 'Male') return false;
 
-                                const hasWardShiftToday     = wardShifts.some(s => s.day === day     && s.doctorId === candidate);
-                                const hasWardShiftYesterday = wardShifts.some(s => s.day === day - 1 && s.doctorId === candidate);
-                                const hasWardShiftTomorrow  = wardShifts.some(s => s.day === day + 1 && s.doctorId === candidate);
-                                const hasOtherERToday       = newERShifts.some(s => s.day === day     && s.doctorId === candidate);
+                                const hasWardShiftToday     = wardShifts.some(x => x.day === day     && x.doctorId === candidate);
+                                const hasWardShiftYesterday = wardShifts.some(x => x.day === day - 1 && x.doctorId === candidate);
+                                const hasWardShiftTomorrow  = wardShifts.some(x => x.day === day + 1 && x.doctorId === candidate);
+                                const hasOtherERToday       = newERShifts.some(x => x.day === day     && x.doctorId === candidate);
 
                                 // Ward-to-ER 12h rule (existing)
                                 const isNightCall = slotIdx >= 2;
@@ -465,8 +464,8 @@ export function useStaffingData() {
                                     const doc = doctorMap.get(candidate);
                                     if (cat.maleOnly && doc?.gender !== 'Male') return false;
 
-                                    const hasWardShiftToday = wardShifts.some(s => s.day === day && s.doctorId === candidate);
-                                    const hasOtherERToday   = newERShifts.some(s => s.day === day && s.doctorId === candidate);
+                                    const hasWardShiftToday = wardShifts.some(x => x.day === day && x.doctorId === candidate);
+                                    const hasOtherERToday   = newERShifts.some(x => x.day === day && x.doctorId === candidate);
                                     const erCrossConflict   = hasERConflictYesterday(candidate);
 
                                     return !hasWardShiftToday && !hasOtherERToday && !erCrossConflict;
@@ -480,18 +479,18 @@ export function useStaffingData() {
                                 .filter(candidate => {
                                     const doc = doctorMap.get(candidate);
                                     if (cat.maleOnly && doc?.gender !== 'Male') return false;
-                                    return !newERShifts.some(s => s.day === day && s.doctorId === candidate);
+                                    return !newERShifts.some(x => x.day === day && x.doctorId === candidate);
                                 })
                                 .sort((a, b) => hoursMap[a] - hoursMap[b]);
                         }
 
                         if (eligible.length > 0) {
-                            const candidate = eligible[0];
+                            const dId = eligible[0];
                             newERShifts.push({
-                                id: `er-${cat.id}-${day}-${slotIdx}-${s}`,
-                                period, day, wardId: cat.id, doctorId: candidate, slotIndex: slotIdx
+                                id: `er-${period}-${day}-${cat.id}-${slotIdx}-${s}`,
+                                period, day, wardId: cat.id, doctorId: dId, slotIndex: slotIdx
                             });
-                            hoursMap[candidate] += cat.duration;
+                            hoursMap[dId] += cat.duration;
                         }
                     }
                 });
@@ -555,10 +554,14 @@ export function useStaffingData() {
         const canTakeShift = (doctorId: string, shift: ShiftRecord, shifts: ShiftRecord[]): boolean => {
             const doctorShifts = shifts.filter(s => s.period === period && s.doctorId === doctorId && s.id !== shift.id);
             const isNightER = (shift.slotIndex ?? 0) >= 2;
+            const isWardShift = !shift.wardId.startsWith('er-');
             const shiftStart = SLOT_START[shift.slotIndex ?? 0] ?? 8;
 
             for (const s of doctorShifts) {
+                // Same-day conflict
                 if (s.day === shift.day) return false;
+                
+                // Cross-day ER rest rule
                 if (s.wardId.startsWith('er-') && s.day === shift.day - 1) {
                     const prevEnd = SLOT_END[s.slotIndex ?? 0] ?? 24;
                     if ((shiftStart + 24) - prevEnd < 12) return false;
@@ -568,12 +571,54 @@ export function useStaffingData() {
                     const shiftEnd = SLOT_END[shift.slotIndex ?? 0] ?? 24;
                     if ((nextStart + 24) - shiftEnd < 12) return false;
                 }
-                if (!s.wardId.startsWith('er-') && s.day === shift.day - 1 && !isNightER) return false;
-                if (!s.wardId.startsWith('er-') && s.day === shift.day + 1 && isNightER) return false;
+
+                // Ward-to-ER Fatigue Rules
+                if (isWardShift) {
+                    // Current is Ward. If s is ER Night yesterday, block.
+                    if (s.wardId.startsWith('er-') && s.day === shift.day - 1 && (s.slotIndex ?? 0) >= 2) return false;
+                } else {
+                    // Current is ER. If s was Ward yesterday and current is Morning ER, block? 
+                    // (Handled by general 12h gap in future if needed, but for now specific night-to-morning)
+                    if (!s.wardId.startsWith('er-') && s.day === shift.day - 1 && !isNightER) return false;
+                    if (!s.wardId.startsWith('er-') && s.day === shift.day + 1 && isNightER) return false;
+                }
             }
             return true;
         };
 
+        // --- PHASE 1: Intra-Ward Balance (Ward Shifts Only) ---
+        const periodAssignments = data.assignments.filter(a => a.period === period);
+        for (const assignment of periodAssignments) {
+            let wardChanges = true;
+            let wardIterations = 0;
+            while (wardChanges && wardIterations < 100) {
+                wardChanges = false;
+                wardIterations++;
+
+                const pool = assignment.doctorIds;
+                const wardStats = pool.map(id => ({
+                    id,
+                    count: currentShifts.filter(s => s.period === period && s.doctorId === id && s.wardId === assignment.wardId).length
+                })).sort((a, b) => b.count - a.count);
+
+                if (wardStats.length < 2) break;
+                const max = wardStats[0];
+                const min = wardStats[wardStats.length - 1];
+
+                if (max.count - min.count > 1) {
+                    const candidates = currentShifts.filter(s => s.period === period && s.doctorId === max.id && s.wardId === assignment.wardId);
+                    for (const s of candidates) {
+                        if (canTakeShift(min.id, s, currentShifts)) {
+                            currentShifts = currentShifts.map(x => x.id === s.id ? { ...x, doctorId: min.id } : x);
+                            wardChanges = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- PHASE 2: Global Time Equity (ER & Referrals Only) ---
         let iterations = 0;
         const MAX_ITERATIONS = 1000;
         let changesMade = true;
@@ -602,19 +647,25 @@ export function useStaffingData() {
 
             let bestMove: { type: 'move' | 'swap', shiftId: string, otherShiftId?: string, toDocId: string } | null = null;
 
-            // Try the top 5 heavy vs bottom 5 light to find any legal move/swap
+            const getDuration = (s: ShiftRecord) => {
+                if (s.wardId === 'er-referral') return 24;
+                if (s.wardId === 'er-men' || s.wardId === 'er-women') return 6;
+                if (s.wardId === 'er-pediatric') return 8;
+                return 12;
+            };
+
             outer: for (const fromDoc of leaderboard.slice(0, 5)) {
                 for (const toDoc of leaderboard.slice(-5).reverse()) {
                     if (fromDoc.hours - toDoc.hours <= 12) continue;
 
-                    const fromShifts = currentShifts.filter(s => s.period === period && s.doctorId === fromDoc.id && s.wardId.startsWith('er-'));
-                    const toShifts = currentShifts.filter(s => s.period === period && s.doctorId === toDoc.id && s.wardId.startsWith('er-'));
+                    const fromER = currentShifts.filter(s => s.period === period && s.doctorId === fromDoc.id && s.wardId.startsWith('er-'));
+                    const toER = currentShifts.filter(s => s.period === period && s.doctorId === toDoc.id && s.wardId.startsWith('er-'));
 
-                    // A. SIMPLE MOVE (Check referrals first for max impact)
-                    for (const s of fromShifts.sort((a,b) => (b.wardId === 'er-referral' ? 24:6) - (a.wardId === 'er-referral' ? 24:6))) {
-                        if (s.wardId === 'er-referral' && data.doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
+                    // A. MOVE
+                    for (const s of fromER.sort((a,b) => getDuration(b) - getDuration(a))) {
+                        if (s.wardId === 'er-referral' && doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
                         if (canTakeShift(toDoc.id, s, currentShifts)) {
-                            const dur = s.wardId === 'er-referral' ? 24 : 6;
+                            const dur = getDuration(s);
                             if (toDoc.hours + dur < fromDoc.hours) {
                                 bestMove = { type: 'move', shiftId: s.id, toDocId: toDoc.id };
                                 break outer;
@@ -622,15 +673,16 @@ export function useStaffingData() {
                         }
                     }
 
-                    // B. SWAP (Referral for 6h slot)
-                    const fromRefs = fromShifts.filter(s => s.wardId === 'er-referral');
-                    const toSmall = toShifts.filter(s => s.wardId !== 'er-referral');
+                    // B. SWAP
+                    const fromRefs = fromER.filter(s => s.wardId === 'er-referral');
+                    const toSmall = toER.filter(s => s.wardId !== 'er-referral');
                     for (const ref of fromRefs) {
-                        if (data.doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
+                        if (doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
                         for (const small of toSmall) {
                             if (canTakeShift(toDoc.id, ref, currentShifts.filter(x => x.id !== ref.id && x.id !== small.id)) &&
                                 canTakeShift(fromDoc.id, small, currentShifts.filter(x => x.id !== ref.id && x.id !== small.id))) {
-                                if (toDoc.hours + 18 < fromDoc.hours) {
+                                const netChange = getDuration(ref) - getDuration(small);
+                                if (toDoc.hours + netChange < fromDoc.hours) {
                                     bestMove = { type: 'swap', shiftId: ref.id, otherShiftId: small.id, toDocId: toDoc.id };
                                     break outer;
                                 }

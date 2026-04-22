@@ -1271,9 +1271,9 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                 const erHours = doctorShifts
                     .filter((s: any) => s.wardId.startsWith('er-'))
                     .reduce((total: number, s: any) => {
-                        if (s.wardId === 'er-referral') return total + 24;
-                        if (s.wardId === 'er-men' || s.wardId === 'er-women') return total + 6;
-                        if (s.wardId === 'er-pediatric') return total + 8;
+                        if (s.wardId.includes('referral')) return total + 24;
+                        if (s.wardId.includes('men') || s.wardId.includes('women')) return total + 6;
+                        if (s.wardId.includes('pediatric')) return total + 8;
                         return total + 12;
                     }, 0);
 
