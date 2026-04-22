@@ -410,7 +410,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate }: { staffing: any,
             </AnimatePresence>
         </div>
     );
-}
+});
 
 function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onNavigate, onClose }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green' | 'indigo', slots: string[], onNavigate: (id: string) => void, onClose: () => void }) {
     const dayShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.day === day && s.wardId === wardId);
@@ -460,7 +460,7 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
             </div>
         </div>
     );
-});
+}
 
 function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => Promise<boolean>, isLoading: boolean }) {
     const [name, setName] = useState(''); const [pass, setPass] = useState(''); const [error, setError] = useState(false);
