@@ -169,8 +169,9 @@ export function useStaffingData() {
     } finally { setSyncing(false); }
   }, [data]);
 
-  const calculateTotalHours = useCallback((doctorId: string, period?: string) => {
-    return data.shifts
+  const calculateTotalHours = useCallback((doctorId: string, period?: string, customShifts?: ShiftRecord[]) => {
+    const shiftsToUse = customShifts || data.shifts;
+    return shiftsToUse
         .filter(s => s.doctorId === doctorId && (!period || s.period === period))
         .reduce((total, s) => {
             if (s.wardId === 'er-referral') return total + 24;
@@ -430,5 +431,90 @@ export function useStaffingData() {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
   }, [executeAction]);
 
-  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap, calculateTotalHours };
+  const manualAssignDoctor = useCallback(async (doctorId: string, wardId: string, period: string) => {
+    setSyncing(true);
+    try {
+        const assignment = data.assignments.find(a => a.period === period && a.wardId === wardId);
+        let newAssignments = [...data.assignments];
+        let updatedDoctorIds = assignment ? [...assignment.doctorIds] : [];
+        
+        if (!updatedDoctorIds.includes(doctorId)) {
+            updatedDoctorIds.push(doctorId);
+        }
+
+        if (assignment) {
+            newAssignments = newAssignments.map(a => a.id === assignment.id ? { ...a, doctorIds: updatedDoctorIds } : a);
+        } else {
+            newAssignments.push({ id: `${period}-${wardId}`, period, wardId, doctorIds: [doctorId] });
+        }
+
+        // Update doctor history
+        const doc = data.doctors.find(d => d.id === doctorId);
+        const updatedDocs = data.doctors.map(d => d.id === doctorId && !d.previousWards.includes(wardId) ? { ...d, previousWards: [...d.previousWards, wardId] } : d);
+
+        await fetch('/api/dispatch', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ assignments: newAssignments, doctors: updatedDocs.filter(d => d.id === doctorId) }) 
+        });
+
+        setData(prev => ({ ...prev, assignments: newAssignments, doctors: updatedDocs }));
+    } catch (e) { alert('Manual assignment failed.'); } finally { setSyncing(false); }
+  }, [data]);
+
+  const autoBalanceWorkload = useCallback(async (period: string) => {
+    setSyncing(true);
+    try {
+        let currentShifts = [...data.shifts];
+        let iterations = 0;
+        const maxIterations = 50; // Safety cap
+
+        while (iterations < maxIterations) {
+            // 1. Calculate hours
+            const stats = data.doctors.map(d => ({
+                id: d.id,
+                hours: calculateTotalHours(d.id, period, currentShifts) // Pass currentShifts to calculate correctly
+            })).sort((a, b) => b.hours - a.hours);
+
+            const maxDoc = stats[0];
+            const minDoc = stats[stats.length - 1];
+
+            if (maxDoc.hours - minDoc.hours <= 12) break;
+
+            // 2. Find an ER call to move
+            const erShifts = currentShifts.filter(s => s.period === period && s.doctorId === maxDoc.id && s.wardId.startsWith('er-'));
+            let swapped = false;
+
+            for (const shift of erShifts) {
+                // Check if minDoc is free on this day/slot
+                const isConflict = currentShifts.some(s => s.period === period && s.doctorId === minDoc.id && s.day === shift.day);
+                
+                if (!isConflict) {
+                    currentShifts = currentShifts.map(s => s.id === shift.id ? { ...s, doctorId: minDoc.id } : s);
+                    swapped = true;
+                    break;
+                }
+            }
+
+            if (!swapped) break; // No possible swaps left
+            iterations++;
+        }
+
+        await fetch('/api/shifts', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ shifts: currentShifts }) 
+        });
+
+        setData(prev => ({ ...prev, shifts: currentShifts }));
+        return true;
+    } catch (e) { 
+        alert('Auto-balance failed.'); 
+        return false;
+    } finally { 
+        setSyncing(false); 
+    }
+  }, [data, calculateTotalHours]);
+
+  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload };
 }

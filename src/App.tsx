@@ -25,7 +25,14 @@ export default function App() {
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const staffing = useStaffingData();
 
+  const [viewingDoctorId, setViewingDoctorId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const navigateToDoctor = (id: string) => {
+      setViewingDoctorId(id);
+      setCurrentView('profile');
+      setSidebarOpen(false);
+  };
 
   useEffect(() => {
       if (user) localStorage.setItem('wardstaffer_user', JSON.stringify(user));
@@ -46,7 +53,7 @@ export default function App() {
       return false;
   }, [staffing.doctors]);
 
-  const handleLogout = () => { setUser(null); setCurrentView('dashboard'); };
+  const handleLogout = () => { setUser(null); setCurrentView('dashboard'); setViewingDoctorId(null); };
 
   if (!user) return <LoginPage onLogin={handleLogin} isLoading={staffing.loading} />;
 
@@ -69,8 +76,8 @@ export default function App() {
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 hover:bg-slate-800 rounded text-slate-400"><X className="w-5 h-5" /></button>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          <NavItem active={currentView === 'dashboard'} onClick={() => { setCurrentView('dashboard'); setSidebarOpen(false); }} label="Overview" icon={<ClipboardList className="w-4 h-4" />} />
-          <NavItem active={currentView === 'profile'} onClick={() => { setCurrentView('profile'); setSidebarOpen(false); }} label="My Profile" icon={<User className="w-4 h-4" />} />
+          <NavItem active={currentView === 'dashboard'} onClick={() => { setCurrentView('dashboard'); setViewingDoctorId(null); setSidebarOpen(false); }} label="Overview" icon={<ClipboardList className="w-4 h-4" />} />
+          <NavItem active={currentView === 'profile' && !viewingDoctorId} onClick={() => { setCurrentView('profile'); setViewingDoctorId(null); setSidebarOpen(false); }} label="My Profile" icon={<User className="w-4 h-4" />} />
           <div className="h-px bg-slate-800 my-4"></div>
           <NavItem active={currentView === 'doctors'} onClick={() => { setCurrentView('doctors'); setSidebarOpen(false); }} label="Staff Registry" icon={<Users className="w-4 h-4" />} />
           <NavItem active={currentView === 'wards'} onClick={() => { setCurrentView('wards'); setSidebarOpen(false); }} label="Ward Config" icon={<Hospital className="w-4 h-4" />} />
@@ -90,24 +97,24 @@ export default function App() {
         <header className="h-16 bg-white border-b border-slate-200 px-4 lg:px-8 flex items-center justify-between shadow-sm shrink-0 z-20">
           <div className="flex items-center space-x-3">
             <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 hover:bg-slate-50 rounded-lg border border-slate-200 mr-1"><ListChecks className="w-5 h-5 text-slate-600" /></button>
-            <h1 className="text-sm lg:text-lg font-semibold text-slate-800 capitalize truncate">{currentView === 'er_calls' ? 'ER On-Call' : currentView}</h1>
+            <h1 className="text-sm lg:text-lg font-semibold text-slate-800 capitalize truncate">{currentView === 'profile' && viewingDoctorId ? 'Clinician Profile' : currentView.replace('_', ' ')}</h1>
             <div className="hidden sm:block h-4 w-[1px] bg-slate-200"></div>
-            <div className="hidden sm:flex items-center text-[10px] text-slate-400 uppercase font-bold tracking-wider"><span>{user.role}</span><ChevronRight className="w-3 h-3" /> <span className="text-blue-600">{currentView === 'er_calls' ? 'ER On-Call' : currentView}</span></div>
+            <div className="hidden sm:flex items-center text-[10px] text-slate-400 uppercase font-bold tracking-wider"><span>{user.role}</span><ChevronRight className="w-3 h-3" /> <span className="text-blue-600">{currentView === 'profile' && viewingDoctorId ? 'Clinician Profile' : currentView.replace('_', ' ')}</span></div>
           </div>
           {staffing.syncing && (<div className="flex items-center space-x-2 bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-[10px] font-bold animate-pulse"><RefreshCw className="w-3 h-3 animate-spin" /><span>Syncing...</span></div>)}
         </header>
         <div className="flex-1 overflow-y-auto p-4 lg:p-8 bg-slate-50">
           <div className="max-w-7xl mx-auto">
             <AnimatePresence mode="wait">
-              <motion.div key={currentView + (selectedPeriod || '')} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
-                {currentView === 'dashboard' && <DashboardView staffing={staffing} user={user} />}
-                {currentView === 'calendar' && <ShiftCalendarView staffing={staffing} />}
-                {currentView === 'er_calls' && <ERCallsView staffing={staffing} user={user!} />}
-                {currentView === 'doctors' && <DoctorsView staffing={staffing} user={user} />}
-                {currentView === 'wards' && <WardsView staffing={staffing} user={user} />}
-                {currentView === 'archive' && <MonthlyArchiveView staffing={staffing} user={user} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} />}
-                {currentView === 'assignments' && <AssignmentsView staffing={staffing} />}
-                {currentView === 'profile' && <ProfileView staffing={staffing} user={user} />}
+              <motion.div key={currentView + viewingDoctorId + (selectedPeriod || '')} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
+                {currentView === 'dashboard' && <DashboardView staffing={staffing} user={user} onNavigate={navigateToDoctor} />}
+                {currentView === 'calendar' && <ShiftCalendarView staffing={staffing} onNavigate={navigateToDoctor} />}
+                {currentView === 'er_calls' && <ERCallsView staffing={staffing} user={user!} onNavigate={navigateToDoctor} />}
+                {currentView === 'doctors' && <DoctorsView staffing={staffing} user={user} onNavigate={navigateToDoctor} />}
+                {currentView === 'wards' && <WardsView staffing={staffing} user={user} onNavigate={navigateToDoctor} />}
+                {currentView === 'archive' && <MonthlyArchiveView staffing={staffing} user={user} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} onNavigate={navigateToDoctor} />}
+                {currentView === 'assignments' && <AssignmentsView staffing={staffing} onNavigate={navigateToDoctor} />}
+                {currentView === 'profile' && <ProfileView staffing={staffing} user={user} targetDoctorId={viewingDoctorId} />}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -204,8 +211,8 @@ function ShiftCalendarView({ staffing }: { staffing: any }) {
                                             </div>
                                             <div className="flex -space-x-2">
                                                 {dayShifts.map((s: ShiftRecord) => (
-                                                    <div key={s.id} className="group/avatar relative">
-                                                        <div className="w-10 h-10 rounded-full border-2 border-white bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 cursor-help ring-1 ring-slate-100">{staffing.doctorMap.get(s.doctorId)?.name.charAt(0)}</div>
+                                                    <div key={s.id} className="group/avatar relative" onClick={() => onNavigate(s.doctorId)}>
+                                                        <div className="w-10 h-10 rounded-full border-2 border-white bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 cursor-pointer hover:bg-blue-600 hover:text-white transition-all ring-1 ring-slate-100">{staffing.doctorMap.get(s.doctorId)?.name.charAt(0)}</div>
                                                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-[9px] rounded opacity-0 group-hover/avatar:opacity-100 pointer-events-none transition-all whitespace-nowrap z-50 font-bold uppercase">{staffing.doctorMap.get(s.doctorId)?.name}</div>
                                                     </div>
                                                 ))}
@@ -225,7 +232,7 @@ function ShiftCalendarView({ staffing }: { staffing: any }) {
     );
 }
 
-function ERCallsView({ staffing, user }: { staffing: any, user: User }) {
+function ERCallsView({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) {
     const [viewDate, setViewDate] = useState(new Date());
     const [selectedDay, setSelectedDay] = useState<number | null>(null);
     const [dragSourceWard, setDragSourceWard] = useState<string | null>(null);
@@ -322,10 +329,10 @@ function ERCallsView({ staffing, user }: { staffing: any, user: User }) {
                                 <button onClick={() => setSelectedDay(null)} className="p-2 hover:bg-white/10 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
                             </div>
                             <div className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 overflow-y-auto flex-grow bg-slate-50/50">
-                                <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} />
-                                <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} />
-                                <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00']} />
-                                <ERModalColumn title="Daily Referral" wardId="er-referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={['24-Hour Duty Rotation']} />
+                                <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} />
+                                <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} />
+                                <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} />
+                                <ERModalColumn title="Daily Referral" wardId="er-referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={['24-Hour Duty Rotation']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} />
                             </div>
                             <div className="p-5 md:p-6 bg-white border-t border-slate-100 flex-shrink-0"><button onClick={() => setSelectedDay(null)} className="w-full bg-blue-600 text-white py-3 rounded-2xl font-bold shadow-lg shadow-blue-600/20 active:scale-95 transition-all text-sm uppercase tracking-widest">Finish Review</button></div>
                         </div>
@@ -336,21 +343,21 @@ function ERCallsView({ staffing, user }: { staffing: any, user: User }) {
     );
 }
 
-function ERModalColumn({ title, wardId, day, period, staffing, color, slots }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green', slots: string[] }) {
+function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onNavigate, onClose }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green' | 'indigo', slots: string[], onNavigate: (id: string) => void, onClose: () => void }) {
     const dayShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.day === day && s.wardId === wardId);
-    const colors: any = { blue: 'text-blue-600 bg-blue-50 border-blue-100', pink: 'text-pink-600 bg-pink-50 border-pink-100', green: 'text-green-600 bg-green-50 border-green-100' };
+    const colors: any = { blue: 'text-blue-600 bg-blue-50 border-blue-100', pink: 'text-pink-600 bg-pink-50 border-pink-100', green: 'text-green-600 bg-green-50 border-green-100', indigo: 'text-indigo-600 bg-indigo-50 border-indigo-100' };
     return (
         <div className="space-y-4">
             <h4 className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full w-fit ${colors[color]}`}>{title} Department</h4>
             <div className="space-y-3">
                 {slots.map((time, idx) => {
                     const slotShifts = dayShifts.filter(s => s.slotIndex === idx);
-                    const isHighDensity = (idx === 1 || idx === 2) && wardId !== 'er-pediatric';
+                    const isHighDensity = (idx === 1 || idx === 2) && (wardId === 'er-men' || wardId === 'er-women');
                     return (
                         <div key={idx} className="p-3 bg-white rounded-xl border border-slate-100 shadow-sm group hover:border-blue-200 transition-all">
                             <p className="text-[8px] font-bold text-slate-400 uppercase mb-2">{time}</p>
                             <div className="space-y-2">
-                                {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 1 : 2) }).map((_, sIdx) => {
+                                {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 3 : (wardId === 'er-referral' ? 1 : 2)) }).map((_, sIdx) => {
                                     const shift = slotShifts[sIdx];
                                     let badgeColor = 'bg-slate-50 text-slate-400';
                                     let roleLabel = '';
@@ -365,14 +372,13 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots }: {
                                         }
                                     } else {
                                         badgeColor = shift ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-slate-50 text-slate-400';
-                                        roleLabel = 'General ER';
+                                        roleLabel = wardId === 'er-referral' ? 'External Referral' : 'General ER';
                                     }
                                     
                                     return (
-                                        <div key={sIdx} className={`flex flex-col p-1.5 rounded-lg border ${badgeColor}`}>
+                                        <div key={sIdx} className={`flex flex-col p-1.5 rounded-lg border ${badgeColor} ${shift ? 'cursor-pointer hover:bg-slate-100 transition-colors' : ''}`} onClick={() => { if (shift) { onNavigate(shift.doctorId); onClose(); } }}>
                                             <div className="flex justify-between items-center mb-1">
                                                 <span className="text-[7px] uppercase font-black tracking-tighter opacity-70">{roleLabel}</span>
-                                                {shift && <button className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-600 transition-opacity"><Edit2 className="w-3 h-3" /></button>}
                                             </div>
                                             <span className="text-[9px] font-bold truncate">{shift ? staffing.doctorMap.get(shift.doctorId)?.name : 'Unassigned'}</span>
                                         </div>
@@ -403,12 +409,16 @@ function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => 
     );
 }
 
-function ProfileView({ staffing, user }: { staffing: any, user: AuthUser }) {
-    const doctor = staffing.doctors.find((d: any) => d.name === user.name);
-    const myAssignments = staffing.assignments.filter((a: any) => a.doctorIds.includes(user.id)).sort((a: any, b: any) => b.period.localeCompare(a.period));
+function ProfileView({ staffing, user, targetDoctorId }: { staffing: any, user: AuthUser, targetDoctorId: string | null }) {
+    const isSelf = !targetDoctorId || targetDoctorId === user.id;
+    const effectiveId = targetDoctorId || user.id;
+    const doctor = staffing.doctors.find((d: any) => d.id === effectiveId);
+    if (!doctor) return <div className="p-12 text-center text-slate-400">Physician record not found.</div>;
+
+    const myAssignments = staffing.assignments.filter((a: any) => a.doctorIds.includes(effectiveId)).sort((a: any, b: any) => b.period.localeCompare(a.period));
     const [viewDate, setViewDate] = useState(new Date());
     const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
-    const myShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.doctorId === user.id);
+    const myShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.doctorId === effectiveId);
     
     const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
     const firstDayIdx = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
@@ -416,16 +426,34 @@ function ProfileView({ staffing, user }: { staffing: any, user: AuthUser }) {
     const [newPass, setNewPass] = useState('');
     return (
         <div className="space-y-8">
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-                <div className="flex items-center space-x-6"><div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center text-3xl font-bold text-blue-600 border border-blue-100">{user.name.charAt(0)}</div><div><h2 className="text-2xl font-bold text-slate-900">{user.name}</h2><div className="flex items-center gap-3 mt-2"><span className="px-3 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase rounded-full">ID: {user.id}</span><span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-bold uppercase rounded-full">{user.role}</span></div></div></div>
-                {user.id !== 'root' && (<div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Access Key</label><div className="flex gap-2"><input type="password" placeholder="New Key" value={newPass} onChange={e => setNewPass(e.target.value)} className="text-xs p-2 rounded-lg border border-slate-200" /><button onClick={() => { staffing.updateDoctor({ ...doctor, password: newPass }); setNewPass(''); alert('Security Key Updated.'); }} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700"><Key className="w-4 h-4" /></button></div></div>)}
+            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="flex items-center space-x-6">
+                    <div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center text-3xl font-bold text-blue-600 border border-blue-100">{doctor.name.charAt(0)}</div>
+                    <div>
+                        <h2 className="text-2xl font-bold text-slate-900">{doctor.name}</h2>
+                        <div className="flex flex-wrap items-center gap-3 mt-2">
+                            <span className="px-3 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase rounded-full">ID: {doctor.id}</span>
+                            <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-bold uppercase rounded-full">Role: Resident</span>
+                            <span className="px-3 py-1 bg-amber-50 text-amber-600 text-[10px] font-bold uppercase rounded-full border border-amber-100">{staffing.calculateTotalHours(doctor.id, period)} Weighted Hours</span>
+                        </div>
+                    </div>
+                </div>
+                {isSelf && user.id !== 'root' && (
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 w-full md:w-auto">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Update Security Key</label>
+                        <div className="flex gap-2">
+                            <input type="password" placeholder="New Key" value={newPass} onChange={e => setNewPass(e.target.value)} className="text-xs p-2 rounded-lg border border-slate-200 flex-1" />
+                            <button onClick={() => { staffing.updateDoctor({ ...doctor, password: newPass }); setNewPass(''); alert('Security Key Updated.'); }} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700"><Key className="w-4 h-4" /></button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2 space-y-6">
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                         <div className="flex items-center justify-between mb-6">
-                            <div className="flex items-center gap-3"><div className="bg-blue-50 p-2 rounded-lg text-blue-600"><Calendar className="w-5 h-5" /></div><div><h3 className="text-sm font-bold text-slate-800">My Duty Calendar</h3><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(viewDate)}</p></div></div>
+                            <div className="flex items-center gap-3"><div className="bg-blue-50 p-2 rounded-lg text-blue-600"><Calendar className="w-5 h-5" /></div><div><h3 className="text-sm font-bold text-slate-800">Operational Duty Calendar</h3><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(viewDate)}</p></div></div>
                             <div className="flex gap-1"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-1.5 hover:bg-slate-50 rounded border border-slate-200"><ArrowLeft className="w-3.5 h-3.5" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-1.5 hover:bg-slate-50 rounded border border-slate-200"><ArrowRight className="w-3.5 h-3.5" /></button></div>
                         </div>
                         <div className="grid grid-cols-7 gap-px bg-slate-100 rounded-xl overflow-hidden border border-slate-100">
@@ -442,8 +470,8 @@ function ProfileView({ staffing, user }: { staffing: any, user: AuthUser }) {
                                                 const isER = shift.wardId.startsWith('er-');
                                                 return (
                                                     <div key={shift.id} className={`p-1 rounded text-[7px] font-bold uppercase leading-tight ${isER ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-blue-600 text-white'}`}>
-                                                        <p className="truncate">{isER ? 'ER Call' : staffing.wardMap.get(shift.wardId)?.name}</p>
-                                                        <p className="opacity-80">{isER ? (shift.wardId.split('-')[1]) : `Slot ${shift.slotIndex + 1}`}</p>
+                                                        <p className="truncate">{isER ? (shift.wardId === 'er-referral' ? 'REFERRAL' : 'ER CALL') : staffing.wardMap.get(shift.wardId)?.name}</p>
+                                                        <p className="opacity-80">{isER ? (shift.wardId.split('-')[1]?.toUpperCase() || 'DUTY') : `Slot ${shift.slotIndex + 1}`}</p>
                                                     </div>
                                                 );
                                             })}
@@ -460,15 +488,15 @@ function ProfileView({ staffing, user }: { staffing: any, user: AuthUser }) {
                         <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> Dispatch Assignment</h3>
                         {myAssignments[0] ? (
                             <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
-                                <p className="text-[10px] uppercase text-blue-500 font-bold mb-1">Assigned Ward</p>
+                                <p className="text-[10px] uppercase text-blue-500 font-bold mb-1">Primary Unit</p>
                                 <p className="text-xl font-bold text-blue-900">{staffing.wardMap.get(myAssignments[0].wardId)?.name}</p>
-                                <p className="text-xs text-blue-700 mt-4">Rotation: {myAssignments[0].period}</p>
+                                <p className="text-xs text-blue-700 mt-4">Rotation Cycle: {myAssignments[0].period}</p>
                             </div>
-                        ) : (<p className="text-xs text-slate-400 italic py-8 text-center">No active rotation.</p>)}
+                        ) : (<p className="text-xs text-slate-400 italic py-8 text-center">No active rotation in this cycle.</p>)}
                     </div>
                     <div className="technical-card p-6">
-                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><Clock className="w-4 h-4 text-blue-600" /> Unit History</h3>
-                        <div className="flex flex-wrap gap-2">{doctor?.previousWards?.map((wId: string) => (<span key={wId} className="px-3 py-1.5 bg-slate-100 text-slate-700 text-[10px] font-bold uppercase rounded-lg border border-slate-200">{staffing.wardMap.get(wId)?.name || wId}</span>)) || <p className="text-xs text-slate-400 italic">None.</p>}</div>
+                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><Clock className="w-4 h-4 text-blue-600" /> Rotation History</h3>
+                        <div className="flex flex-wrap gap-2">{doctor?.previousWards?.map((wId: string) => (<span key={wId} className="px-3 py-1.5 bg-slate-100 text-slate-700 text-[10px] font-bold uppercase rounded-lg border border-slate-200">{staffing.wardMap.get(wId)?.name || wId}</span>)) || <p className="text-xs text-slate-400 italic">None recorded.</p>}</div>
                     </div>
                 </div>
             </div>
@@ -493,31 +521,63 @@ const DashboardView = React.memo(({ staffing, user }: { staffing: any, user: Aut
   const topPerformer = sortedByHours[0];
   const lowPerformer = sortedByHours[sortedByHours.length - 1];
 
+  const topPerformerAssignment = topPerformer ? staffing.assignments.find((a: any) => a.period === targetPeriod && a.doctorIds.includes(topPerformer.id)) : null;
+  const lowPerformerAssignment = lowPerformer ? staffing.assignments.find((a: any) => a.period === targetPeriod && a.doctorIds.includes(lowPerformer.id)) : null;
+
   return (
     <div className="space-y-8">
       <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden"><div className="relative z-10"><h2 className="text-2xl font-bold">Hospital Overview</h2><p className="text-blue-100 mt-2 text-sm max-w-lg">{user.role === 'admin' ? "Full Control Mode." : myAssignment ? `Assigned to ${staffing.wardMap.get(myAssignment.wardId)?.name} for ${myAssignment.period}.` : "No active rotation."}</p></div><Hospital className="absolute right-[-20px] bottom-[-20px] w-64 h-64 text-white/10 rotate-12" /></div>
       
       {isAdmin && sortedByHours.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
-                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Activity className="w-24 h-24 text-blue-600" /></div>
-                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowLeft className="w-4 h-4 text-blue-600 rotate-90" /> Peak Workload</h3>
-                  <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-xl font-bold text-blue-600 border border-blue-100">{topPerformer.name.charAt(0)}</div>
+          <div className="space-y-6">
+              <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center gap-3">
+                      <div className="bg-blue-50 p-2 rounded-xl text-blue-600"><Scale className="w-5 h-5" /></div>
                       <div>
-                          <p className="text-lg font-bold text-slate-800">{topPerformer.name}</p>
-                          <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded w-fit mt-1">{topPerformer.totalHours} Weighted Hours</p>
+                          <h3 className="text-sm font-bold text-slate-800">Operational Equity Monitor</h3>
+                          <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Variance Analysis: {topPerformer.totalHours - lowPerformer.totalHours} Weighted Hours</p>
                       </div>
                   </div>
+                  {(topPerformer.totalHours - lowPerformer.totalHours) > 12 && (
+                      <button 
+                          onClick={() => { if(confirm(`Variance is ${topPerformer.totalHours - lowPerformer.totalHours}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod); }}
+                          className="flex items-center gap-2 bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-slate-800 transition-all shadow-lg"
+                      >
+                          <RefreshCw className={`w-3 h-3 ${staffing.syncing ? 'animate-spin' : ''}`} />
+                          Auto-Balance Workload
+                      </button>
+                  )}
               </div>
-              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
-                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Clock className="w-24 h-24 text-green-600" /></div>
-                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowLeft className="w-4 h-4 text-green-600 -rotate-90" /> Lowest Workload</h3>
-                  <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 bg-green-50 rounded-2xl flex items-center justify-center text-xl font-bold text-green-600 border border-green-100">{lowPerformer.name.charAt(0)}</div>
-                      <div>
-                          <p className="text-lg font-bold text-slate-800">{lowPerformer.name}</p>
-                          <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest bg-green-50 px-2 py-0.5 rounded w-fit mt-1">{lowPerformer.totalHours} Weighted Hours</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
+                      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Activity className="w-24 h-24 text-blue-600" /></div>
+                      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowLeft className="w-4 h-4 text-blue-600 rotate-90" /> Peak Workload</h3>
+                      <div className="flex items-center gap-4">
+                          <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-xl font-bold text-blue-600 border border-blue-100 cursor-pointer hover:bg-blue-600 hover:text-white transition-all" onClick={() => onNavigate(topPerformer.id)}>{topPerformer.name.charAt(0)}</div>
+                          <div>
+                              <p className="text-lg font-bold text-slate-800 hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(topPerformer.id)}>{topPerformer.name}</p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">{staffing.wardMap.get(topPerformerAssignment?.wardId)?.name || 'Float/Unassigned'}</p>
+                              <div className="flex items-center gap-2">
+                                  <span className="text-2xl font-black text-blue-600">{topPerformer.totalHours}</span>
+                                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mt-1">Weighted Hours</span>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
+                      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Clock className="w-24 h-24 text-green-600" /></div>
+                      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowLeft className="w-4 h-4 text-green-600 -rotate-90" /> Lowest Workload</h3>
+                      <div className="flex items-center gap-4">
+                          <div className="w-14 h-14 bg-green-50 rounded-2xl flex items-center justify-center text-xl font-bold text-green-600 border border-green-100 cursor-pointer hover:bg-green-600 hover:text-white transition-all" onClick={() => onNavigate(lowPerformer.id)}>{lowPerformer.name.charAt(0)}</div>
+                          <div>
+                              <p className="text-lg font-bold text-slate-800 hover:text-green-600 cursor-pointer transition-colors" onClick={() => onNavigate(lowPerformer.id)}>{lowPerformer.name}</p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">{staffing.wardMap.get(lowPerformerAssignment?.wardId)?.name || 'Float/Unassigned'}</p>
+                              <div className="flex items-center gap-2">
+                                  <span className="text-2xl font-black text-green-600">{lowPerformer.totalHours}</span>
+                                  <span className="text-[10px] font-bold text-green-400 uppercase tracking-widest mt-1">Weighted Hours</span>
+                              </div>
+                          </div>
                       </div>
                   </div>
               </div>
@@ -578,11 +638,22 @@ const DoctorsView = React.memo(({ staffing, user }: { staffing: any, user: AuthU
     setEditingId(null); 
     setNewDoctor({ name: '', gender: 'Male', previousWards: [] }); 
   };
-  return (<div className="space-y-6"><div className="flex justify-between items-end bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><div><h2 className="text-xl font-bold text-slate-800">Personnel Registry</h2></div>{user.role === 'admin' && (<button className="btn-primary" onClick={() => setShowAdd(!showAdd)}><UserPlus className="w-4 h-4" /> Register</button>)}</div><AnimatePresence>{showAdd && user.role === 'admin' && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div className="technical-card p-8 bg-white mb-6 border-blue-100 ring-1 ring-blue-50"><div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div><label className="text-[10px] uppercase font-bold text-slate-400">Name</label><input type="text" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newDoctor.name} onChange={e => setNewDoctor(prev => ({ ...prev, name: e.target.value }))} /></div><div><label className="text-[10px] uppercase font-bold text-slate-400">Gender</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newDoctor.gender} onChange={e => setNewDoctor(prev => ({ ...prev, gender: e.target.value as Gender }))}><option value="Male">Male</option><option value="Female">Female</option></select></div></div><div className="flex gap-3 mt-8 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save</button></div></div></motion.div>)}</AnimatePresence><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Gender</th>{user.role === 'admin' && <th className="col-header text-right">Actions</th>}</tr></thead><tbody className="text-sm divide-y divide-slate-100">{filtered.map((d: Doctor) => (<tr key={d.id} className="hover:bg-slate-50/50 group"><td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{d.id}</td><td className="px-6 py-4 font-semibold text-slate-800">{d.name}</td><td className="px-6 py-4 text-xs"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${d.gender === 'Male' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-pink-50 text-pink-600 border-pink-100'}`}>{d.gender}</span></td>{user.role === 'admin' && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(d.id); setNewDoctor(d); setShowAdd(true); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100" onClick={() => { if(confirm('Delete?')) staffing.deleteDoctor(d.id); }}><Trash2 className="w-4 h-4" /></button></td>}</tr>))}</tbody></table></div></div>);
+  return (<div className="space-y-6"><div className="flex justify-between items-end bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><div><h2 className="text-xl font-bold text-slate-800">Personnel Registry</h2></div>{user.role === 'admin' && (<button className="btn-primary" onClick={() => setShowAdd(!showAdd)}><UserPlus className="w-4 h-4" /> Register</button>)}</div><AnimatePresence>{showAdd && user.role === 'admin' && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div className="technical-card p-8 bg-white mb-6 border-blue-100 ring-1 ring-blue-50"><div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div><label className="text-[10px] uppercase font-bold text-slate-400">Name</label><input type="text" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newDoctor.name} onChange={e => setNewDoctor(prev => ({ ...prev, name: e.target.value }))} /></div><div><label className="text-[10px] uppercase font-bold text-slate-400">Gender</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newDoctor.gender} onChange={e => setNewDoctor(prev => ({ ...prev, gender: e.target.value as Gender }))}><option value="Male">Male</option><option value="Female">Female</option></select></div></div><div className="flex gap-3 mt-8 pt-6 border-t border-slate-100"><button className="btn-primary px-8" onClick={handleAdd}>Save</button></div></div></motion.div>)}</AnimatePresence><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Gender</th>{user.role === 'admin' && <th className="col-header text-right">Actions</th>}</tr></thead><tbody className="text-sm divide-y divide-slate-100">{filtered.map((d: Doctor) => (<tr key={d.id} className="hover:bg-slate-50/50 group"><td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{d.id}</td><td className="px-6 py-4 font-semibold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => onNavigate(d.id)}>{d.name}</td><td className="px-6 py-4 text-xs"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${d.gender === 'Male' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-pink-50 text-pink-600 border-pink-100'}`}>{d.gender}</span></td>{user.role === 'admin' && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(d.id); setNewDoctor(d); setShowAdd(true); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100" onClick={() => { if(confirm('Delete?')) staffing.deleteDoctor(d.id); }}><Trash2 className="w-4 h-4" /></button></td>}</tr>))}</tbody></table></div></div>);
 });
 
 const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUser }) => {
-    const [showAdd, setShowAdd] = useState(false); const [editingId, setEditingId] = useState<string | null>(null); const [newWard, setNewWard] = useState<Partial<Ward>>({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' } });
+    const isAdmin = user.role === 'admin';
+    const currentPeriod = new Date().toISOString().slice(0, 7);
+    const [targetPeriod, setTargetPeriod] = useState(currentPeriod);
+    const [showAdd, setShowAdd] = useState(false); 
+    const [editingId, setEditingId] = useState<string | null>(null); 
+    const [newWard, setNewWard] = useState<Partial<Ward>>({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' } });
+    const [dragDoctor, setDragDoctor] = useState<string | null>(null);
+
+    const periodAssignments = staffing.assignments.filter((a: any) => a.period === targetPeriod);
+    const assignedDoctorIds = new Set(periodAssignments.flatMap((a: any) => a.doctorIds));
+    const unassignedDoctors = staffing.doctors.filter((d: Doctor) => d.id !== 'root' && !assignedDoctorIds.has(d.id));
+
     const handleAdd = () => { 
         if (!newWard.name) return; 
         const payload = { 
@@ -601,10 +672,41 @@ const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUse
         if (editingId) staffing.updateWard(payload); else staffing.addWard(payload); 
         setShowAdd(false); setEditingId(null); setNewWard({ name: '', requirements: { totalDoctors: 2, genderDiversity: 'None', staffPerShift: 1, shiftDuration: '12h' } }); 
     };
+
+    const handleDrop = (wardId: string) => {
+        if (!dragDoctor || !isAdmin) return;
+        staffing.manualAssignDoctor(dragDoctor, wardId, targetPeriod);
+        setDragDoctor(null);
+    };
+
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-end bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><div><h2 className="text-xl font-bold text-slate-800">Unit Configuration</h2></div>{user.role === 'admin' && (<button className="btn-primary" onClick={() => setShowAdd(!showAdd)}><Plus className="w-4 h-4" /> Add Unit</button>)}</div>
-            <AnimatePresence>{showAdd && user.role === 'admin' && (
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm gap-4">
+                <div><h2 className="text-xl font-bold text-slate-800">Unit Configuration</h2><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Personnel Dispatch & Unit Management</p></div>
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                    <input type="month" className="text-sm p-2 bg-slate-50 border border-slate-200 rounded-xl" value={targetPeriod} onChange={(e) => setTargetPeriod(e.target.value)} />
+                    {isAdmin && (<button className="btn-primary" onClick={() => setShowAdd(!showAdd)}><Plus className="w-4 h-4" /> Add Unit</button>)}
+                </div>
+            </div>
+
+            {isAdmin && (
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /> Unassigned Personnel Pool ({targetPeriod})</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {unassignedDoctors.length > 0 ? unassignedDoctors.map((d: Doctor) => (
+                            <div key={d.id} draggable onDragStart={() => setDragDoctor(d.id)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-blue-50 transition-all flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${d.gender === 'Male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                                {d.name}
+                            </div>
+                        )) : (
+                            <p className="text-xs text-slate-400 italic">All clinicians have been dispatched for this rotation.</p>
+                        )}
+                    </div>
+                    <p className="mt-4 text-[10px] text-slate-400 font-bold uppercase tracking-tighter italic">* Drag a physician from the pool and drop them on a unit below to manually assign them.</p>
+                </div>
+            )}
+
+            <AnimatePresence>{showAdd && isAdmin && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                     <div className="technical-card p-8 space-y-6 bg-white mb-6 border-blue-100 ring-1 ring-blue-50">
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -627,23 +729,41 @@ const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUse
                     </div>
                 </motion.div>
             )}</AnimatePresence>
+
             <div className="technical-card overflow-hidden">
                 <table className="technical-grid">
-                    <thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Shift Specs</th><th className="col-header">Status</th><th className="col-header">Capacity</th>{user.role === 'admin' && <th className="col-header text-right">Actions</th>}</tr></thead>
+                    <thead><tr className="bg-slate-50/50"><th className="col-header">ID</th><th className="col-header">Name</th><th className="col-header">Shift Specs</th><th className="col-header">Status</th><th className="col-header">Personnel Pool</th>{isAdmin && <th className="col-header text-right">Actions</th>}</tr></thead>
                     <tbody className="text-sm divide-y divide-slate-100">
-                        {staffing.wards.map((w: Ward) => (
-                            <tr key={w.id} className="hover:bg-slate-50/50 group"><td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{w.id}</td><td className="px-6 py-4 font-semibold text-slate-800">{w.name}</td>
-                            <td className="px-6 py-4"><div className="flex gap-2"><span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded border border-blue-100 flex items-center gap-1"><Activity className="w-3 h-3" /> {w.requirements.staffPerShift} Doc</span><span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Clock className="w-3 h-3" /> {w.requirements.shiftDuration}</span></div></td>
-                            <td className="px-6 py-4">
-                                {w.parentWardId ? (
-                                    <span className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Link className="w-3 h-3" /> Sub to {staffing.wardMap.get(w.parentWardId)?.name}</span>
-                                ) : (
-                                    <span className="px-2 py-0.5 bg-green-50 text-green-600 text-[9px] font-bold uppercase rounded border border-green-100">Main Station</span>
-                                )}
-                            </td>
-                            <td className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase">{w.requirements.totalDoctors} Total Staff</td>
-                            {user.role === 'admin' && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(w.id); setNewWard(w); setShowAdd(true); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100" onClick={() => { if(confirm('Remove?')) staffing.deleteWard(w.id); }}><Trash2 className="w-4 h-4" /></button></td>}</tr>
-                        ))}
+                        {staffing.wards.map((w: Ward) => {
+                            const assignment = periodAssignments.find((a: any) => a.wardId === w.id);
+                            const docCount = assignment?.doctorIds.length || 0;
+                            return (
+                                <tr key={w.id} onDragOver={e => isAdmin && e.preventDefault()} onDrop={() => handleDrop(w.id)} className={`hover:bg-slate-50/50 group transition-all ${dragDoctor ? 'bg-blue-50/50 ring-1 ring-blue-100 ring-inset' : ''}`}>
+                                    <td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{w.id}</td>
+                                    <td className="px-6 py-4 font-semibold text-slate-800">{w.name}</td>
+                                    <td className="px-6 py-4"><div className="flex gap-2"><span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded border border-blue-100 flex items-center gap-1"><Activity className="w-3 h-3" /> {w.requirements.staffPerShift} Doc</span><span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Clock className="w-3 h-3" /> {w.requirements.shiftDuration}</span></div></td>
+                                    <td className="px-6 py-4">
+                                        {w.parentWardId ? (
+                                            <span className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Link className="w-3 h-3" /> Sub to {staffing.wardMap.get(w.parentWardId)?.name}</span>
+                                        ) : (
+                                            <span className="px-2 py-0.5 bg-green-50 text-green-600 text-[9px] font-bold uppercase rounded border border-green-100">Main Station</span>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex -space-x-2">
+                                                {assignment?.doctorIds.slice(0, 3).map((id: string) => (
+                                                    <div key={id} className="w-7 h-7 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-600 shadow-sm">{staffing.doctorMap.get(id)?.name.charAt(0)}</div>
+                                                ))}
+                                                {docCount > 3 && <div className="w-7 h-7 rounded-full border-2 border-white bg-blue-600 flex items-center justify-center text-[8px] font-bold text-white">+{docCount - 3}</div>}
+                                            </div>
+                                            <span className={`text-[10px] font-bold uppercase tracking-tighter ${docCount >= w.requirements.totalDoctors ? 'text-green-600' : 'text-amber-500'}`}>{docCount} / {w.requirements.totalDoctors} Staffed</span>
+                                        </div>
+                                    </td>
+                                    {isAdmin && <td className="px-6 py-4 text-right flex justify-end gap-2"><button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(w.id); setNewWard(w); setShowAdd(true); }}><Edit2 className="w-4 h-4" /></button><button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100" onClick={() => { if(confirm('Remove?')) staffing.deleteWard(w.id); }}><Trash2 className="w-4 h-4" /></button></td>}
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
