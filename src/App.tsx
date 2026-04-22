@@ -543,8 +543,12 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
       
       {isAdmin && sortedByHours.length > 0 && (
           <div className="space-y-6">
-              <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:scale-110 transition-all"><Scale className="w-48 h-48 text-slate-900" /></div>
+          <div className={`bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm relative group transition-all ${showExclusionDrop ? 'z-40' : 'z-10'}`}>
+                  <div className="absolute inset-0 overflow-hidden rounded-[32px] pointer-events-none">
+                      <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:scale-110 transition-all">
+                          <Scale className="w-48 h-48 text-slate-900" />
+                      </div>
+                  </div>
                   
                   {/* Exclusion Dropdown */}
                   <div className="absolute top-6 right-6 z-30">
