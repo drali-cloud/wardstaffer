@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link
+  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CheckCircle, Scale
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
@@ -504,9 +504,10 @@ function ProfileView({ staffing, user, targetDoctorId }: { staffing: any, user: 
     );
 }
 
-const DashboardView = React.memo(({ staffing, user }: { staffing: any, user: AuthUser }) => {
+const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) => {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [targetPeriod, setTargetPeriod] = useState(currentMonth);
+  const [showEquityResults, setShowEquityResults] = useState(false);
   const myAssignment = staffing.assignments.filter((a: any) => a.doctorIds.includes(user.id)).sort((a: any, b: any) => b.period.localeCompare(a.period))[0];
   const isAdmin = user.role === 'admin';
 
