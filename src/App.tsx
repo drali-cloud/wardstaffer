@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
-import { Doctor, Ward, Gender, Assignment, ShiftRecord } from './types';
+import { Doctor, Ward, Gender, Assignment, ShiftRecord, AuditLog } from './types';
 import * as XLSX from 'xlsx';
 
 type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar' | 'equity';

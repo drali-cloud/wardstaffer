@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Doctor, Ward, Assignment, Gender, ShiftRecord } from '../types';
+import { Doctor, Ward, Assignment, Gender, ShiftRecord, AuditLog } from '../types';
 
 interface StaffingData {
   doctors: Doctor[];
