@@ -549,5 +549,48 @@ export function useStaffingData() {
     }
   }, [data, calculateTotalHours]);
 
-  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload };
+  const batchUpdateHistory = useCallback(async (period: string, action: 'add' | 'remove') => {
+    setSyncing(true);
+    try {
+        const periodAssignments = data.assignments.filter(a => a.period === period);
+        let updatedDocs: Doctor[] = [];
+        
+        data.doctors.forEach(d => {
+            const assignment = periodAssignments.find(a => a.doctorIds.includes(d.id));
+            if (!assignment) return;
+            
+            const wardId = assignment.wardId;
+            let history = [...d.previousWards];
+            
+            if (action === 'add') {
+                if (!history.includes(wardId)) {
+                    history.push(wardId);
+                    updatedDocs.push({ ...d, previousWards: history });
+                }
+            } else {
+                if (history.includes(wardId)) {
+                    history = history.filter(id => id !== wardId);
+                    updatedDocs.push({ ...d, previousWards: history });
+                }
+            }
+        });
+
+        if (updatedDocs.length > 0) {
+            await fetch('/api/import', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ doctors: updatedDocs }) 
+            });
+            setData(prev => ({
+                ...prev,
+                doctors: prev.doctors.map(d => updatedDocs.find(ud => ud.id === d.id) || d)
+            }));
+            alert(`History updated for ${updatedDocs.length} clinicians.`);
+        } else {
+            alert('No changes needed.');
+        }
+    } catch (e) { alert('History update failed.'); } finally { setSyncing(false); }
+  }, [data]);
+
+  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory };
 }

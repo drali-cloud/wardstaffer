@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CheckCircle, Scale
+  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CheckCircle, Scale, History, RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
@@ -1033,8 +1033,28 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
                 </div>
 
                 {isAdmin && (
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <button onClick={() => handleExportExcel(viewMode === 'er' ? 'er' : 'ward')} className="flex items-center gap-2 text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20"><Download className="w-3.5 h-3.5" /> Export {viewMode.toUpperCase()}</button>
+                        
+                        <div className="h-8 w-px bg-slate-200 mx-1" />
+
+                        <button 
+                            onClick={() => { if(confirm('Add this month\'s assignments to each clinician\'s permanent clinical history?')) staffing.batchUpdateHistory(selectedPeriod, 'add'); }}
+                            className="flex items-center gap-2 text-[10px] font-bold uppercase bg-indigo-50 text-indigo-600 border border-indigo-100 px-4 py-2 rounded-xl hover:bg-indigo-100 transition-all"
+                            title="Commit rotation to history"
+                        >
+                            <History className="w-3.5 h-3.5" /> Commit to History
+                        </button>
+                        <button 
+                            onClick={() => { if(confirm('Remove this month\'s assignments from each clinician\'s clinical history?')) staffing.batchUpdateHistory(selectedPeriod, 'remove'); }}
+                            className="flex items-center gap-2 text-[10px] font-bold uppercase bg-slate-50 text-slate-500 border border-slate-100 px-4 py-2 rounded-xl hover:bg-slate-100 transition-all"
+                            title="Revert history changes"
+                        >
+                            <RotateCcw className="w-3.5 h-3.5" /> Revert History
+                        </button>
+
+                        <div className="h-8 w-px bg-slate-200 mx-1" />
+
                         {viewMode !== 'dispatch' && (
                             <button 
                                 onClick={() => staffing.clearRosterByPeriod(selectedPeriod, viewMode)}
