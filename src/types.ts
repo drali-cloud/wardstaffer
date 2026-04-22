@@ -40,3 +40,11 @@ export interface Assignment {
   wardId: string;
   doctorIds: string[];
 }
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  action: 'swap_er' | 'auto_balance' | 'manual_assign';
+  details: string;
+  period: string;
+}

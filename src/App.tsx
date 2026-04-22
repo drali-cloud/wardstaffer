@@ -8,6 +8,25 @@ import { Doctor, Ward, Gender, Assignment, ShiftRecord } from './types';
 import * as XLSX from 'xlsx';
 
 type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar' | 'equity';
+
+const getSlotName = (slotIdx: number, wardId: string = '') => {
+  if (wardId === 'er-referral') return '24h Call';
+  if (wardId === 'er-pediatric') {
+    if (slotIdx === 0) return 'Morning';
+    if (slotIdx === 1) return 'Post Morning';
+    return 'Night';
+  }
+  if (wardId.startsWith('er-')) {
+    switch (slotIdx) {
+      case 0: return 'Morning';
+      case 1: return 'Post Morning';
+      case 2: return 'Pre Night';
+      case 3: return 'Night';
+      default: return `Slot ${slotIdx + 1}`;
+    }
+  }
+  return `Slot ${slotIdx + 1}`;
+};
 type Role = 'resident' | 'admin';
 
 interface AuthUser {
@@ -322,6 +341,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
     const [viewDate, setViewDate] = useState(archivePeriod ? new Date(archivePeriod + '-02') : new Date());
     const [selectedDay, setSelectedDay] = useState<number | null>(null);
     const [dragSourceWard, setDragSourceWard] = useState<string | null>(null);
+    const [draggedShift, setDraggedShift] = useState<ShiftRecord | null>(null);
     const isAdmin = !archivePeriod && user.role === 'admin';
 
     const period = archivePeriod || `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
@@ -330,6 +350,18 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
     const firstDayIdx = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1).getDay();
     
     const erShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.wardId.startsWith('er-'));
+
+    const handleDropOnDay = async (day: number) => {
+        if (!draggedShift || !isAdmin || draggedShift.day === day) return;
+        // Simple case: swap with someone in the SAME slot on another day
+        const targetShift = erShifts.find(s => s.day === day && s.wardId === draggedShift.wardId && s.slotIndex === draggedShift.slotIndex);
+        if (targetShift) {
+            await staffing.swapERCalls(period, draggedShift, targetShift);
+            setDraggedShift(null);
+        } else {
+            alert('Target slot empty or mismatch. Manual swap requires an existing counterpart.');
+        }
+    };
 
     const handleDrop = (cat: 'men' | 'women' | 'pediatric') => {
         if (!dragSourceWard || !isAdmin) return;
@@ -396,7 +428,11 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                     const day = i + 1;
                     const dayShifts = erShifts.filter((s: ShiftRecord) => s.day === day);
                     return (
-                        <div key={day} onClick={() => setSelectedDay(day)} className="bg-white p-2 min-h-[90px] cursor-pointer hover:bg-amber-50 transition-all border-b border-r border-slate-100 group relative">
+                        <div key={day} 
+                             onClick={() => setSelectedDay(day)} 
+                             onDragOver={e => isAdmin && e.preventDefault()}
+                             onDrop={() => isAdmin && handleDropOnDay(day)}
+                             className="bg-white p-2 min-h-[90px] cursor-pointer hover:bg-amber-50 transition-all border-b border-r border-slate-100 group relative">
                             <span className="text-xs font-bold text-slate-400">{day}</span>
                             {dayShifts.length > 0 && (
                                 <div className="mt-2 space-y-1">
@@ -418,10 +454,10 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                                 <button onClick={() => setSelectedDay(null)} className="p-2 hover:bg-white/10 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
                             </div>
                             <div className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 overflow-y-auto flex-grow bg-slate-50/50">
-                                <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} />
-                                <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} />
-                                <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} />
-                                <ERModalColumn title="Daily Referral" wardId="er-referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={['24-Hour Duty Rotation']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} />
+                                <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
+                                <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
+                                <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
+                                <ERModalColumn title="Daily Referral" wardId="er-referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={['24-Hour Duty Rotation']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
                             </div>
                             <div className="p-5 md:p-6 bg-white border-t border-slate-100 flex-shrink-0"><button onClick={() => setSelectedDay(null)} className="w-full bg-blue-600 text-white py-3 rounded-2xl font-bold shadow-lg shadow-blue-600/20 active:scale-95 transition-all text-sm uppercase tracking-widest">Finish Review</button></div>
                         </div>
@@ -432,7 +468,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
     );
 });
 
-function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onNavigate, onClose }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green' | 'indigo', slots: string[], onNavigate: (id: string) => void, onClose: () => void }) {
+function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onNavigate, onClose, onDragShift, draggedShift }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green' | 'indigo', slots: string[], onNavigate: (id: string) => void, onClose: () => void, onDragShift: (s: ShiftRecord | null) => void, draggedShift: ShiftRecord | null }) {
     const dayShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.day === day && s.wardId === wardId);
     const colors: any = { blue: 'text-blue-600 bg-blue-50 border-blue-100', pink: 'text-pink-600 bg-pink-50 border-pink-100', green: 'text-green-600 bg-green-50 border-green-100', indigo: 'text-indigo-600 bg-indigo-50 border-indigo-100' };
     return (
@@ -443,8 +479,21 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
                     const slotShifts = dayShifts.filter(s => s.slotIndex === idx);
                     const isHighDensity = (idx === 1 || idx === 2) && (wardId === 'er-men' || wardId === 'er-women');
                     return (
-                        <div key={idx} className="p-3 bg-white rounded-xl border border-slate-100 shadow-sm group hover:border-blue-200 transition-all">
-                            <p className="text-[8px] font-bold text-slate-400 uppercase mb-2">{time}</p>
+                        <div key={idx} 
+                             onDragOver={e => e.preventDefault()}
+                             onDrop={async () => {
+                                 if (!draggedShift) return;
+                                 const targetShift = slotShifts[0]; // For simplicity, pick first in slot
+                                 if (targetShift && targetShift.id !== draggedShift.id) {
+                                     await staffing.swapERCalls(period, draggedShift, targetShift);
+                                     onDragShift(null);
+                                 }
+                             }}
+                             className="p-3 bg-white rounded-xl border border-slate-100 shadow-sm group hover:border-blue-200 transition-all">
+                            <p className="text-[8px] font-bold text-slate-400 uppercase mb-2 flex justify-between">
+                                <span>{time}</span>
+                                <span className="text-blue-600">{getSlotName(idx, wardId)}</span>
+                            </p>
                             <div className="space-y-2">
                                 {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 1 : (wardId === 'er-referral' ? 1 : 2)) }).map((_, sIdx) => {
                                     const shift = slotShifts[sIdx];
@@ -465,7 +514,11 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
                                     }
                                     
                                     return (
-                                        <div key={sIdx} className={`flex flex-col p-1.5 rounded-lg border ${badgeColor} ${shift ? 'cursor-pointer hover:bg-slate-100 transition-colors' : ''}`} onClick={() => { if (shift) { onNavigate(shift.doctorId); onClose(); } }}>
+                                        <div key={sIdx} 
+                                             draggable={!!shift}
+                                             onDragStart={() => shift && onDragShift(shift)}
+                                             className={`flex flex-col p-1.5 rounded-lg border ${badgeColor} ${shift ? 'cursor-grab active:cursor-grabbing hover:bg-slate-100 transition-colors' : ''}`} 
+                                             onClick={() => { if (shift) { onNavigate(shift.doctorId); onClose(); } }}>
                                             <div className="flex justify-between items-center mb-1">
                                                 <span className="text-[7px] uppercase font-black tracking-tighter opacity-70">{roleLabel}</span>
                                             </div>
@@ -589,7 +642,7 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
                                                 return (
                                                     <div key={shift.id} className={`p-1 rounded text-[7px] font-bold uppercase leading-tight ${isER ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-blue-600 text-white'}`}>
                                                         <p className="truncate">{isER ? (shift.wardId === 'er-referral' ? 'REFERRAL' : 'ER CALL') : staffing.wardMap.get(shift.wardId)?.name}</p>
-                                                        <p className="opacity-80">{isER ? (shift.wardId.split('-')[1]?.toUpperCase() || 'DUTY') : `Slot ${shift.slotIndex + 1}`}</p>
+                                                        <p className="opacity-80">{isER ? getSlotName(shift.slotIndex, shift.wardId) : `Slot ${shift.slotIndex + 1}`}</p>
                                                     </div>
                                                 );
                                             })}
@@ -1137,6 +1190,37 @@ const AssignmentsView = React.memo(({ staffing }: { staffing: any }) => {
     return (<div className="space-y-6"><div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><h2 className="text-xl font-bold text-slate-800">Dispatch History</h2></div><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">Period</th><th className="col-header">Ward</th><th className="col-header">Personnel Pool</th></tr></thead><tbody className="text-sm divide-y divide-slate-100">{staffing.assignments.slice().reverse().map((a: Assignment) => (<tr key={a.id}><td className="px-6 py-4 text-[10px] font-mono text-blue-600 font-bold uppercase">{a.period}</td><td className="px-6 py-4 font-semibold text-slate-800">{staffing.wardMap.get(a.wardId)?.name}</td><td className="px-6 py-4"><div className="flex flex-wrap gap-1.5 font-mono text-[9px]">{a.doctorIds.map(id => (<span key={id} className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-bold uppercase">{staffing.doctorMap.get(id)?.name}</span>))}</div></td></tr>))}</tbody></table></div></div>);
 });
 
+const HistoryLogView = React.memo(({ staffing }: { staffing: any }) => {
+    return (
+        <div className="space-y-6">
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                <div className="flex items-center gap-4 mb-8">
+                    <div className="bg-slate-900 p-3 rounded-2xl text-white"><History className="w-6 h-6" /></div>
+                    <div><h2 className="text-2xl font-bold text-slate-900">Clinical Audit Trail</h2><p className="text-xs text-slate-400 uppercase font-bold tracking-widest mt-1">Personnel Adjustment Logs</p></div>
+                </div>
+                <div className="space-y-3">
+                    {staffing.logs.length === 0 ? (
+                        <div className="py-12 text-center text-slate-400 italic text-sm">No activity recorded in the audit trail.</div>
+                    ) : staffing.logs.map((log: AuditLog) => (
+                        <div key={log.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group hover:border-blue-200 transition-all">
+                            <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-slate-200 text-slate-400 group-hover:text-blue-600 transition-all shadow-sm">
+                                    {log.action === 'swap_er' ? <RefreshCw className="w-5 h-5" /> : <Shield className="w-5 h-5" />}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-slate-800">{log.details}</p>
+                                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Period: {log.period} • {new Date(log.timestamp).toLocaleString()}</p>
+                                </div>
+                            </div>
+                            <span className="px-3 py-1 bg-white border border-slate-200 text-[9px] font-black uppercase text-slate-500 rounded-lg">{log.action}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+});
+
 function StatCard({ label, value, icon }: { label: string, value: number, icon: React.ReactNode }) { return (<div className="bg-white border border-slate-200 rounded-xl p-6 flex items-start justify-between shadow-sm hover:shadow-md transition-shadow"><div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">{label}</p><p className="text-3xl font-bold text-slate-900">{value}</p></div><div className="bg-blue-50 p-2.5 rounded-lg">{icon}</div></div>); }
 
 const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavigate: (id: string) => void }) => {
@@ -1147,6 +1231,7 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
         return saved ? JSON.parse(saved) : [];
     });
     const [showExclusionDrop, setShowExclusionDrop] = useState(false);
+    const [showLogs, setShowLogs] = useState(false);
 
     useEffect(() => {
         localStorage.setItem('wardstaffer_excluded_wards', JSON.stringify(excludedWardIds));
@@ -1291,140 +1376,149 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 space-y-6">
-                    <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden">
-                        <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /> Clinical Workload Registry</h3>
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">{activeStats.length} Included / {excludedWardIds.length} Exempt</span>
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left">
-                                <thead>
-                                    <tr className="bg-white border-b border-slate-100">
-                                        <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Physician</th>
-                                        <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Primary Unit</th>
-                                        <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Weighted Hours</th>
-                                        <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {sortedDoctors.map((d: any) => (
-                                        <tr key={d.id} className={`group hover:bg-slate-50 transition-colors ${d.isExcluded ? 'opacity-40 grayscale' : ''}`}>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 group-hover:bg-blue-600 group-hover:text-white transition-all cursor-pointer" onClick={() => onNavigate(d.id)}>{d.name.charAt(0)}</div>
-                                                    <span className="text-sm font-bold text-slate-700 hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(d.id)}>{d.name}</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className="text-xs font-medium text-slate-500">{d.currentWard}</span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                                        <div className={`h-full transition-all duration-1000 ${d.totalHours > 180 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${Math.min((d.totalHours / 250) * 100, 100)}%` }} />
-                                                    </div>
-                                                    <span className="text-sm font-black text-slate-900">{d.totalHours}h</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
-                                                {d.isExcluded ? (
-                                                    <span className="text-[8px] font-bold bg-slate-200 text-slate-500 px-2 py-1 rounded uppercase tracking-widest">Exempt</span>
-                                                ) : (
-                                                    <span className={`text-[8px] font-bold px-2 py-1 rounded uppercase tracking-widest ${d.totalHours > 180 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>
-                                                        {d.totalHours > 180 ? 'Peak' : 'Active'}
-                                                    </span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="space-y-6">
-                    <div className="bg-slate-900 rounded-[32px] p-8 text-white shadow-2xl relative overflow-hidden group">
-                        <Activity className="absolute right-[-20px] top-[-20px] w-48 h-48 text-white/5 rotate-12 group-hover:scale-110 transition-transform duration-700" />
-                        <div className="relative z-10">
-                            <h3 className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-6">Equity Control</h3>
-                            <div className="space-y-8">
-                                <div>
-                                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-2">Workload Variance</p>
-                                    <div className="flex items-end gap-3">
-                                        <span className={`text-5xl font-black ${variance > 12 ? 'text-amber-400' : 'text-green-400'}`}>{variance}h</span>
-                                        <span className="text-xs text-slate-400 mb-2 font-medium">Weighted Gap</span>
-                                    </div>
-                                </div>
-                                
-                                <div className="space-y-4">
-                                    <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
-                                        <p className="text-xs text-slate-300 leading-relaxed italic">
-                                            {variance > 12 
-                                                ? "Significant disparity detected. Auto-balance is recommended to redistribute ER shifts from peak clinicians to those with lower volume."
-                                                : "Workload distribution is currently within equitable thresholds. No intervention required."}
-                                        </p>
-                                    </div>
-
-                                    {variance > 12 ? (
-                                        <button 
-                                            onClick={() => { if(confirm(`Variance is ${variance}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod, excludedWardIds); }}
-                                            className="w-full bg-blue-600 text-white py-4 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-600/30 flex items-center justify-center gap-3 active:scale-95"
-                                        >
-                                            <RefreshCw className={`w-4 h-4 ${staffing.syncing ? 'animate-spin' : ''}`} />
-                                            Execute Auto-Balance
-                                        </button>
-                                    ) : (
-                                        <div className="w-full bg-green-500/20 text-green-400 py-4 rounded-2xl text-xs font-bold uppercase tracking-widest border border-green-500/30 flex items-center justify-center gap-3">
-                                            <CheckCircle className="w-4 h-4" />
-                                            System Balanced
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm">
-                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><ListChecks className="w-4 h-4 text-blue-600" /> Clinical Integrity Checklist</h3>
-                        <div className="space-y-4">
-                            {integrityAudit.map(check => (
-                                <div key={check.id} className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50">
-                                    <div className="flex items-center justify-between mb-1">
-                                        <span className="text-[10px] font-black uppercase text-slate-700">{check.label}</span>
-                                        {check.status === 'pass' ? <CheckCircle className="w-4 h-4 text-green-500" /> : 
-                                         check.status === 'warn' ? <AlertTriangle className="w-4 h-4 text-amber-500" /> : 
-                                         <XCircle className="w-4 h-4 text-red-500" />}
-                                    </div>
-                                    <p className="text-[10px] text-slate-500 leading-relaxed italic">{check.detail}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm">
-                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><Scale className="w-4 h-4 text-blue-600" /> Metric Configuration</h3>
-                        <div className="space-y-6">
-                            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                <div>
-                                    <p className="text-sm font-bold text-slate-800">Referral Multiplier</p>
-                                    <p className="text-[10px] text-slate-400 uppercase">Weight: 24.0x</p>
-                                </div>
-                                <div className="w-10 h-10 bg-white rounded-xl border border-slate-200 flex items-center justify-center"><Check className="w-5 h-5 text-green-500" /></div>
-                            </div>
-                            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                <div>
-                                    <p className="text-sm font-bold text-slate-800">ER Shift Weight</p>
-                                    <p className="text-[10px] text-slate-400 uppercase">Weight: 12.0x</p>
-                                </div>
-                                <div className="w-10 h-10 bg-white rounded-xl border border-slate-200 flex items-center justify-center"><Check className="w-5 h-5 text-green-500" /></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div className="flex flex-wrap gap-4 mb-10">
+                <button onClick={() => setShowLogs(false)} className={`px-8 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all ${!showLogs ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/20' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Equity Dashboard</button>
+                <button onClick={() => setShowLogs(true)} className={`px-8 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all ${showLogs ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/20' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>History Log</button>
             </div>
+
+            {showLogs ? (
+                <HistoryLogView staffing={staffing} />
+            ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div className="lg:col-span-2 space-y-6">
+                        <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden">
+                            <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /> Clinical Workload Registry</h3>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">{activeStats.length} Included / {excludedWardIds.length} Exempt</span>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="bg-white border-b border-slate-100">
+                                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Physician</th>
+                                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Primary Unit</th>
+                                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Weighted Hours</th>
+                                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {sortedDoctors.map((d: any) => (
+                                            <tr key={d.id} className={`group hover:bg-slate-50 transition-colors ${d.isExcluded ? 'opacity-40 grayscale' : ''}`}>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 group-hover:bg-blue-600 group-hover:text-white transition-all cursor-pointer" onClick={() => onNavigate(d.id)}>{d.name.charAt(0)}</div>
+                                                        <span className="text-sm font-bold text-slate-700 hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(d.id)}>{d.name}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className="text-xs font-medium text-slate-500">{d.currentWard}</span>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                            <div className={`h-full transition-all duration-1000 ${d.totalHours > 180 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${Math.min((d.totalHours / 250) * 100, 100)}%` }} />
+                                                        </div>
+                                                        <span className="text-sm font-black text-slate-900">{d.totalHours}h</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    {d.isExcluded ? (
+                                                        <span className="text-[8px] font-bold bg-slate-200 text-slate-500 px-2 py-1 rounded uppercase tracking-widest">Exempt</span>
+                                                    ) : (
+                                                        <span className={`text-[8px] font-bold px-2 py-1 rounded uppercase tracking-widest ${d.totalHours > 180 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>
+                                                            {d.totalHours > 180 ? 'Peak' : 'Active'}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-6">
+                        <div className="bg-slate-900 rounded-[32px] p-8 text-white shadow-2xl relative overflow-hidden group">
+                            <Activity className="absolute right-[-20px] top-[-20px] w-48 h-48 text-white/5 rotate-12 group-hover:scale-110 transition-transform duration-700" />
+                            <div className="relative z-10">
+                                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-6">Equity Control</h3>
+                                <div className="space-y-8">
+                                    <div>
+                                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-2">Workload Variance</p>
+                                        <div className="flex items-end gap-3">
+                                            <span className={`text-5xl font-black ${variance > 12 ? 'text-amber-400' : 'text-green-400'}`}>{variance}h</span>
+                                            <span className="text-xs text-slate-400 mb-2 font-medium">Weighted Gap</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="space-y-4">
+                                        <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                                            <p className="text-xs text-slate-300 leading-relaxed italic">
+                                                {variance > 12 
+                                                    ? "Significant disparity detected. Auto-balance is recommended to redistribute ER shifts from peak clinicians to those with lower volume."
+                                                    : "Workload distribution is currently within equitable thresholds. No intervention required."}
+                                            </p>
+                                        </div>
+
+                                        {variance > 12 ? (
+                                            <button 
+                                                onClick={() => { if(confirm(`Variance is ${variance}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod, excludedWardIds); }}
+                                                className="w-full bg-blue-600 text-white py-4 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-600/30 flex items-center justify-center gap-3 active:scale-95"
+                                            >
+                                                <RefreshCw className={`w-4 h-4 ${staffing.syncing ? 'animate-spin' : ''}`} />
+                                                Execute Auto-Balance
+                                            </button>
+                                        ) : (
+                                            <div className="w-full bg-green-500/20 text-green-400 py-4 rounded-2xl text-xs font-bold uppercase tracking-widest border border-green-500/30 flex items-center justify-center gap-3">
+                                                <CheckCircle className="w-4 h-4" />
+                                                System Balanced
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm">
+                            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><ListChecks className="w-4 h-4 text-blue-600" /> Clinical Integrity Checklist</h3>
+                            <div className="space-y-4">
+                                {integrityAudit.map(check => (
+                                    <div key={check.id} className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50">
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="text-[10px] font-black uppercase text-slate-700">{check.label}</span>
+                                            {check.status === 'pass' ? <CheckCircle className="w-4 h-4 text-green-500" /> : 
+                                             check.status === 'warn' ? <AlertTriangle className="w-4 h-4 text-amber-500" /> : 
+                                             <XCircle className="w-4 h-4 text-red-500" />}
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 leading-relaxed italic">{check.detail}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm">
+                            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><Scale className="w-4 h-4 text-blue-600" /> Metric Configuration</h3>
+                            <div className="space-y-6">
+                                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-800">Referral Multiplier</p>
+                                        <p className="text-[10px] text-slate-400 uppercase">Weight: 24.0x</p>
+                                    </div>
+                                    <div className="w-10 h-10 bg-white rounded-xl border border-slate-200 flex items-center justify-center"><Check className="w-5 h-5 text-green-500" /></div>
+                                </div>
+                                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-800">ER Shift Weight</p>
+                                        <p className="text-[10px] text-slate-400 uppercase">Weight: 12.0x</p>
+                                    </div>
+                                    <div className="w-10 h-10 bg-white rounded-xl border border-slate-200 flex items-center justify-center"><Check className="w-5 h-5 text-green-500" /></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 });

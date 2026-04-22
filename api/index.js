@@ -17,7 +17,8 @@ app.use(express.json());
 let mockDb = {
   doctors: [],
   wards: [],
-  assignments: []
+  assignments: [],
+  logs: []
 };
 let isUsingMock = false;
 
@@ -39,7 +40,8 @@ async function ensureTables() {
     sql(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL, "parentWardId" TEXT)`),
     sql(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, period TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS shifts (id TEXT PRIMARY KEY, period TEXT NOT NULL, day INTEGER NOT NULL, "wardId" TEXT NOT NULL, "slotIndex" INTEGER NOT NULL, "doctorId" TEXT NOT NULL)`),
-    sql(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+    sql(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`),
+    sql(`CREATE TABLE IF NOT EXISTS logs (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, action TEXT NOT NULL, details TEXT NOT NULL, period TEXT NOT NULL)`)
   ]);
   // Migrations: Ensure newer columns exist in existing tables
   try { await sql(`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS password TEXT`); } catch(e){}
@@ -470,6 +472,32 @@ app.post('/api/config', async (req, res) => {
         const sql = getSql();
         await sql('INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', ['er_config', JSON.stringify(req.body)]);
         res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- Audit Logs ---
+app.get('/api/logs', async (req, res) => {
+    await getTablesReady();
+    if (isUsingMock) return res.json(mockDb.logs || []);
+    try {
+        const sql = getSql();
+        const rows = await sql('SELECT * FROM logs ORDER BY timestamp DESC LIMIT 100');
+        res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/logs', async (req, res) => {
+    await getTablesReady();
+    const log = req.body;
+    if (isUsingMock) {
+        if (!mockDb.logs) mockDb.logs = [];
+        mockDb.logs.unshift(log);
+        return res.json({ success: true });
+    }
+    try {
+        const sql = getSql();
+        await sql('INSERT INTO logs (id, timestamp, action, details, period) VALUES ($1, $2, $3, $4, $5)', [log.id, log.timestamp, log.action, log.details, log.period]);
+        res.status(201).json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -6,10 +6,11 @@ interface StaffingData {
   wards: Ward[];
   assignments: Assignment[];
   shifts: ShiftRecord[];
+  logs: AuditLog[];
 }
 
 export function useStaffingData() {
-  const [data, setData] = useState<StaffingData>({ doctors: [], wards: [], assignments: [], shifts: [] });
+  const [data, setData] = useState<StaffingData>({ doctors: [], wards: [], assignments: [], shifts: [], logs: [] });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[] }>({ men: [], women: [], pediatric: [] });
@@ -20,18 +21,19 @@ export function useStaffingData() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [docsResp, wardsResp, assignmentsResp, shiftsResp, configResp] = await Promise.all([
-        fetch('/api/doctors'), fetch('/api/wards'), fetch('/api/assignments'), fetch('/api/shifts'), fetch('/api/config')
+      const [docsResp, wardsResp, assignmentsResp, shiftsResp, configResp, logsResp] = await Promise.all([
+        fetch('/api/doctors'), fetch('/api/wards'), fetch('/api/assignments'), fetch('/api/shifts'), fetch('/api/config'), fetch('/api/logs')
       ]);
       if (!docsResp.ok) throw new Error('Sync failed.');
-      const [doctors, wards, assignments, shifts, config] = await Promise.all([
-        docsResp.json(), wardsResp.json(), assignmentsResp.json(), shiftsResp.json(), configResp.json()
+      const [doctors, wards, assignments, shifts, config, logs] = await Promise.all([
+        docsResp.json(), wardsResp.json(), assignmentsResp.json(), shiftsResp.json(), configResp.json(), logsResp.json()
       ]);
       setData({ 
           doctors: doctors || [], 
           wards: wards || [], 
           assignments: assignments || [], 
-          shifts: shifts || [] 
+          shifts: shifts || [],
+          logs: logs || []
       });
       setErConfig(config || { men: [], women: [], pediatric: [] });
     } catch (e) { console.error('Fetch error:', e); } finally { setLoading(false); }
@@ -611,5 +613,48 @@ export function useStaffingData() {
     } catch (e) { alert('History update failed.'); } finally { setSyncing(false); }
   }, [data]);
 
-  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory };
+  const addLog = useCallback(async (action: string, details: string, period: string) => {
+    const newLog: AuditLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      timestamp: new Date().toISOString(),
+      action: action as any,
+      details,
+      period
+    };
+    try {
+        await fetch('/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLog) });
+        setData(prev => ({ ...prev, logs: [newLog, ...prev.logs] }));
+    } catch (e) { console.error('Log failure:', e); }
+  }, []);
+
+  const swapERCalls = useCallback(async (period: string, shiftA: ShiftRecord, shiftB: ShiftRecord) => {
+    setSyncing(true);
+    try {
+        const newS1 = { ...shiftA, doctorId: shiftB.doctorId };
+        const newS2 = { ...shiftB, doctorId: shiftA.doctorId };
+        
+        const docAName = doctorMap.get(shiftA.doctorId)?.name || 'Unknown';
+        const docBName = doctorMap.get(shiftB.doctorId)?.name || 'Unknown';
+        const wardAName = wardMap.get(shiftA.wardId)?.name || shiftA.wardId;
+        const wardBName = wardMap.get(shiftB.wardId)?.name || shiftB.wardId;
+
+        await fetch('/api/shifts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify([newS1, newS2])
+        });
+
+        await addLog('swap_er', 
+            `Swapped ${docAName} (${wardAName} Day ${shiftA.day}) with ${docBName} (${wardBName} Day ${shiftB.day})`, 
+            period
+        );
+
+        setData(prev => ({
+            ...prev,
+            shifts: prev.shifts.map(s => s.id === shiftA.id ? newS1 : s.id === shiftB.id ? newS2 : s)
+        }));
+    } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
+  }, [data.shifts, doctorMap, wardMap, addLog]);
+
+  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory };
 }
