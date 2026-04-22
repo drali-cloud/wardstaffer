@@ -1,13 +1,13 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
-  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CheckCircle, Scale, History, RotateCcw, AlertTriangle, XCircle
+  Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CircleCheck, Scale, History, RotateCcw, TriangleAlert, CircleX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
 import { Doctor, Ward, Gender, Assignment, ShiftRecord, AuditLog } from './types';
 import * as XLSX from 'xlsx';
 
-type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar' | 'equity';
+type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar' | 'equity' | 'er_calls';
 
 const getSlotName = (slotIdx: number, wardId: string = '') => {
   if (wardId === 'er-referral') return '24h Call';
@@ -1471,7 +1471,7 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                             </button>
                                         ) : (
                                             <div className="w-full bg-green-500/20 text-green-400 py-4 rounded-2xl text-xs font-bold uppercase tracking-widest border border-green-500/30 flex items-center justify-center gap-3">
-                                                <CheckCircle className="w-4 h-4" />
+                                                <CircleCheck className="w-4 h-4" />
                                                 System Balanced
                                             </div>
                                         )}
@@ -1504,9 +1504,9 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                     <div key={check.id} className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50">
                                         <div className="flex items-center justify-between mb-1">
                                             <span className="text-[10px] font-black uppercase text-slate-700">{check.label}</span>
-                                            {check.status === 'pass' ? <CheckCircle className="w-4 h-4 text-green-500" /> : 
-                                             check.status === 'warn' ? <AlertTriangle className="w-4 h-4 text-amber-500" /> : 
-                                             <XCircle className="w-4 h-4 text-red-500" />}
+                                            {check.status === 'pass' ? <CircleCheck className="w-4 h-4 text-green-500" /> : 
+                                             check.status === 'warn' ? <TriangleAlert className="w-4 h-4 text-amber-500" /> : 
+                                             <CircleX className="w-4 h-4 text-red-500" />}
                                         </div>
                                         <p className="text-[10px] text-slate-500 leading-relaxed italic">{check.detail}</p>
                                     </div>
