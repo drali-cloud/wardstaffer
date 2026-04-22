@@ -7,7 +7,7 @@ import { useStaffingData } from './hooks/useStaffingData';
 import { Doctor, Ward, Gender, Assignment, ShiftRecord } from './types';
 import * as XLSX from 'xlsx';
 
-type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar';
+type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar' | 'equity';
 type Role = 'resident' | 'admin';
 
 interface AuthUser {
@@ -39,19 +39,22 @@ export default function App() {
       else localStorage.removeItem('wardstaffer_user');
   }, [user]);
 
-  const handleLogin = React.useCallback((name: string, pass: string) => {
-      const cleanName = name.trim().toLowerCase();
-      if (cleanName === 'root' && pass === 'root') {
-          setUser({ id: 'root', name: 'System Root', role: 'admin' });
+  const handleLogin = React.useCallback(async (name: string, pass: string) => {
+      try {
+          const res = await fetch('/api/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, password: pass })
+          });
+          if (!res.ok) return false;
+          const user = await res.json();
+          setUser(user);
           return true;
+      } catch (e) {
+          console.error('Login error:', e);
+          return false;
       }
-      const doc = staffing.doctors.find(d => d.name.trim().toLowerCase() === cleanName);
-      if (doc && (doc.password || '11111111') === pass.trim()) {
-          setUser({ id: doc.id, name: doc.name, role: 'resident' });
-          return true;
-      }
-      return false;
-  }, [staffing.doctors]);
+  }, []);
 
   const handleLogout = () => { setUser(null); setCurrentView('dashboard'); setViewingDoctorId(null); };
 
@@ -84,6 +87,7 @@ export default function App() {
           <NavItem active={currentView === 'calendar'} onClick={() => { setCurrentView('calendar'); setSidebarOpen(false); }} label="Shift Calendar" icon={<Calendar className="w-4 h-4" />} />
           <NavItem active={currentView === 'er_calls'} onClick={() => { setCurrentView('er_calls'); setSidebarOpen(false); }} label="ER On-Call" icon={<Activity className="w-4 h-4 text-amber-500" />} />
           <NavItem active={currentView === 'archive'} onClick={() => { setCurrentView('archive'); setSelectedPeriod(null); setSidebarOpen(false); }} label="Archives & Roster" icon={<Archive className="w-4 h-4" />} />
+          {user.role === 'admin' && <NavItem active={currentView === 'equity'} onClick={() => { setCurrentView('equity'); setSidebarOpen(false); }} label="Equity Engine" icon={<Scale className="w-4 h-4 text-blue-400" />} />}
         </nav>
         <div className="p-6 border-t border-slate-800 bg-slate-950/50">
           <div className="space-y-4">
@@ -115,6 +119,7 @@ export default function App() {
                 {currentView === 'archive' && <MonthlyArchiveView staffing={staffing} user={user} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} onNavigate={navigateToDoctor} />}
                 {currentView === 'assignments' && <AssignmentsView staffing={staffing} onNavigate={navigateToDoctor} />}
                 {currentView === 'profile' && <ProfileView staffing={staffing} user={user} targetDoctorId={viewingDoctorId} />}
+                {currentView === 'equity' && <EquityView staffing={staffing} onNavigate={navigateToDoctor} />}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -124,7 +129,48 @@ export default function App() {
   );
 }
 
-function ShiftCalendarView({ staffing }: { staffing: any }) {
+function NavItem({ active, onClick, label, icon }: { active: boolean, onClick: () => void, label: string, icon: React.ReactNode }) {
+    return (
+        <button onClick={onClick} className={`w-full flex items-center space-x-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${active ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-slate-400 hover:bg-slate-800'}`}>
+            {icon} <span>{label}</span>
+        </button>
+    );
+}
+
+function AvatarPopup({ doctor, onNavigate, colorClass = "bg-blue-100 text-blue-600 hover:bg-blue-600", borderClass="border-white ring-slate-100", sizeClass="w-10 h-10" }: any) {
+    const [open, setOpen] = useState(false);
+    if (!doctor) return <div className={`${sizeClass} rounded-full border-2 flex items-center justify-center text-[10px] font-bold text-slate-300 bg-slate-50 border-slate-100`}>?</div>;
+    return (
+        <div 
+            className="relative" 
+            onMouseEnter={() => setOpen(true)} 
+            onMouseLeave={() => setOpen(false)}
+            onClick={(e) => {
+                e.stopPropagation();
+                if (!open && window.innerWidth < 768) {
+                    setOpen(true);
+                    setTimeout(() => setOpen(false), 2500);
+                } else {
+                    onNavigate(doctor.id);
+                }
+            }}
+        >
+            <div className={`${sizeClass} rounded-full border-2 flex items-center justify-center text-xs font-bold cursor-pointer transition-all ring-1 hover:text-white ${colorClass} ${borderClass}`}>
+                {doctor.name.charAt(0)}
+            </div>
+            <AnimatePresence>
+                {open && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2.5 bg-slate-900 text-white rounded-xl shadow-xl z-50 pointer-events-none whitespace-nowrap border border-slate-700">
+                        <p className="text-[10px] font-bold uppercase tracking-wider">{doctor.name}</p>
+                        <p className="text-[8px] text-slate-400 mt-0.5">Click/Tap to view profile</p>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+const ShiftCalendarView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavigate: (id: string) => void }) => {
     const [viewDate, setViewDate] = useState(new Date());
     const [selectedDay, setSelectedDay] = useState<number | null>(null);
     const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
@@ -182,11 +228,24 @@ function ShiftCalendarView({ staffing }: { staffing: any }) {
                 {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`empty-${i}`} className="bg-slate-50/50 min-h-[70px]" />)}
                 {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
-                    const dayShiftsCount = periodShifts.filter((s: ShiftRecord) => s.day === day).length;
+                    const dayShifts = periodShifts.filter((s: ShiftRecord) => s.day === day);
+                    const dayShiftsCount = dayShifts.length;
+                    const referralShift = dayShifts.find(s => s.wardId === 'er-referral');
+
                     return (
                         <div key={day} onClick={() => setSelectedDay(day)} className={`bg-white p-2 min-h-[90px] cursor-pointer hover:bg-blue-50 transition-all border-b border-r border-slate-100 group relative ${selectedDay === day ? 'ring-2 ring-blue-500 z-10' : ''}`}>
                             <span className={`text-xs font-bold ${day === new Date().getDate() && viewDate.getMonth() === new Date().getMonth() ? 'w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center' : 'text-slate-700'}`}>{day}</span>
-                            {dayShiftsCount > 0 && (<div className="mt-2 space-y-1"><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">{dayShiftsCount} Slots</span></div><div className="flex flex-wrap gap-0.5 mt-1">{periodShifts.filter((s: ShiftRecord) => s.day === day).slice(0, 5).map((s: ShiftRecord) => (<div key={s.id} className="w-0.5 h-2.5 bg-blue-100 rounded-full" />))}</div></div>)}
+                            {dayShiftsCount > 0 && (
+                                <div className="mt-2 space-y-1">
+                                    <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">{dayShiftsCount} Slots</span></div>
+                                    {referralShift && (
+                                        <div className="p-1 bg-amber-100 text-amber-700 border border-amber-200 rounded-[4px] text-[7px] font-black uppercase truncate leading-tight">
+                                            REF: {staffing.doctorMap.get(referralShift.doctorId)?.name}
+                                        </div>
+                                    )}
+                                    <div className="flex flex-wrap gap-0.5 mt-1">{dayShifts.slice(0, 5).map((s: ShiftRecord) => (<div key={s.id} className="w-0.5 h-2.5 bg-blue-100 rounded-full" />))}</div>
+                                </div>
+                            )}
                         </div>
                     );
                 })}
@@ -211,16 +270,26 @@ function ShiftCalendarView({ staffing }: { staffing: any }) {
                                             </div>
                                             <div className="flex -space-x-2">
                                                 {dayShifts.map((s: ShiftRecord) => (
-                                                    <div key={s.id} className="group/avatar relative" onClick={() => onNavigate(s.doctorId)}>
-                                                        <div className="w-10 h-10 rounded-full border-2 border-white bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 cursor-pointer hover:bg-blue-600 hover:text-white transition-all ring-1 ring-slate-100">{staffing.doctorMap.get(s.doctorId)?.name.charAt(0)}</div>
-                                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-[9px] rounded opacity-0 group-hover/avatar:opacity-100 pointer-events-none transition-all whitespace-nowrap z-50 font-bold uppercase">{staffing.doctorMap.get(s.doctorId)?.name}</div>
-                                                    </div>
+                                                    <AvatarPopup key={s.id} doctor={staffing.doctorMap.get(s.doctorId)} onNavigate={onNavigate} />
                                                 ))}
                                                 {dayShifts.length === 0 && <span className="text-[10px] text-slate-300 font-bold uppercase italic">Unassigned</span>}
                                             </div>
                                         </div>
                                     );
                                 })}
+                                {(() => {
+                                    const refShift = periodShifts.find((s: ShiftRecord) => s.day === selectedDay && s.wardId === 'er-referral');
+                                    if (!refShift) return null;
+                                    return (
+                                        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex items-center justify-between group hover:border-amber-200 transition-all mt-4">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-slate-200 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-all shadow-sm"><Shield className="w-5 h-5" /></div>
+                                                <div><p className="text-sm font-bold text-slate-800">Daily Referral</p><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">24-Hour On-Call Duty</p></div>
+                                            </div>
+                                            <AvatarPopup doctor={staffing.doctorMap.get(refShift.doctorId)} onNavigate={(id: string) => { onNavigate(id); setSelectedDay(null); }} colorClass="bg-amber-100 text-amber-600 hover:bg-amber-600" />
+                                        </div>
+                                    );
+                                })()}
                             </div>
                             <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end"><button onClick={() => setSelectedDay(null)} className="btn-primary px-8">Close Report</button></div>
                         </div>
@@ -230,9 +299,9 @@ function ShiftCalendarView({ staffing }: { staffing: any }) {
 
         </div>
     );
-}
+});
 
-function ERCallsView({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) {
+const ERCallsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) => {
     const [viewDate, setViewDate] = useState(new Date());
     const [selectedDay, setSelectedDay] = useState<number | null>(null);
     const [dragSourceWard, setDragSourceWard] = useState<string | null>(null);
@@ -357,7 +426,7 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
                         <div key={idx} className="p-3 bg-white rounded-xl border border-slate-100 shadow-sm group hover:border-blue-200 transition-all">
                             <p className="text-[8px] font-bold text-slate-400 uppercase mb-2">{time}</p>
                             <div className="space-y-2">
-                                {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 3 : (wardId === 'er-referral' ? 1 : 2)) }).map((_, sIdx) => {
+                                {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 1 : (wardId === 'er-referral' ? 1 : 2)) }).map((_, sIdx) => {
                                     const shift = slotShifts[sIdx];
                                     let badgeColor = 'bg-slate-50 text-slate-400';
                                     let roleLabel = '';
@@ -393,15 +462,25 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
     );
 }
 
-function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => boolean, isLoading: boolean }) {
+function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => Promise<boolean>, isLoading: boolean }) {
     const [name, setName] = useState(''); const [pass, setPass] = useState(''); const [error, setError] = useState(false);
     return (
         <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl p-8 space-y-8">
                 <div className="text-center"><div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg"><Hospital className="w-8 h-8 text-white" /></div><h1 className="text-2xl font-bold text-white">WardStaffer Portal</h1><p className="text-slate-500 text-sm mt-2">Monthly Clinical Dispatch</p></div>
-                <form onSubmit={e => { e.preventDefault(); if (onLogin(name, pass)) setError(false); else setError(true); }} className="space-y-6">
-                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Staff Name</label><div className="relative flex items-center group"><User className="absolute left-4 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="text" placeholder="Full Registered Name" className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-4.5 px-12 text-sm text-center focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium" value={name} onChange={e => setName(e.target.value)} disabled={isLoading} /></div></div>
-                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Security Access Key</label><div className="relative flex items-center group"><Lock className="absolute left-4 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="password" placeholder="••••••••" className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-4.5 px-12 text-sm text-center focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium" value={pass} onChange={e => setPass(e.target.value)} disabled={isLoading} /></div></div>
+                <form onSubmit={async e => { 
+                    e.preventDefault(); 
+                    const success = await onLogin(name, pass);
+                    if (success) setError(false); 
+                    else setError(true); 
+                }} className="space-y-6">
+                    {error && (
+                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs font-bold text-center animate-shake">
+                            Invalid physician name or security key.
+                        </div>
+                    )}
+                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Staff Name</label><div className="relative flex items-center group"><User className="absolute left-4 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="text" placeholder="Full Registered Name" className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-4.5 px-12 text-sm text-center focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium" value={name} onChange={e => { setName(e.target.value); setError(false); }} disabled={isLoading} /></div></div>
+                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Security Access Key</label><div className="relative flex items-center group"><Lock className="absolute left-4 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="password" placeholder="••••••••" className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-4.5 px-12 text-sm text-center focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium" value={pass} onChange={e => { setPass(e.target.value); setError(false); }} disabled={isLoading} /></div></div>
                     <button type="submit" disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:bg-slate-700 flex items-center justify-center gap-2">{isLoading ? (<><RefreshCw className="w-4 h-4 animate-spin" /> Syncing...</>) : ("Authenticate & Access")}</button>
                 </form>
             </div>
@@ -409,7 +488,7 @@ function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => 
     );
 }
 
-function ProfileView({ staffing, user, targetDoctorId }: { staffing: any, user: AuthUser, targetDoctorId: string | null }) {
+const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: any, user: AuthUser, targetDoctorId: string | null }) => {
     const isSelf = !targetDoctorId || targetDoctorId === user.id;
     const effectiveId = targetDoctorId || user.id;
     const doctor = staffing.doctors.find((d: any) => d.id === effectiveId);
@@ -420,23 +499,42 @@ function ProfileView({ staffing, user, targetDoctorId }: { staffing: any, user: 
     const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
     const myShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.doctorId === effectiveId);
     
+    const erHours = myShifts.filter((s: ShiftRecord) => s.wardId.startsWith('er-')).reduce((sum: number, s: ShiftRecord) => sum + (s.wardId === 'er-referral' ? 24 : 12), 0);
+    const wardHours = myShifts.filter((s: ShiftRecord) => !s.wardId.startsWith('er-')).reduce((sum: number, s: ShiftRecord) => sum + 24, 0);
+    const totalHours = erHours + wardHours;
+    const erPercent = totalHours > 0 ? (erHours / totalHours) * 100 : 0;
+
     const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
     const firstDayIdx = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
 
     const [newPass, setNewPass] = useState('');
     return (
         <div className="space-y-8">
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
-                <div className="flex items-center space-x-6">
-                    <div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center text-3xl font-bold text-blue-600 border border-blue-100">{doctor.name.charAt(0)}</div>
-                    <div>
-                        <h2 className="text-2xl font-bold text-slate-900">{doctor.name}</h2>
-                        <div className="flex flex-wrap items-center gap-3 mt-2">
-                            <span className="px-3 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase rounded-full">ID: {doctor.id}</span>
-                            <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-bold uppercase rounded-full">Role: Resident</span>
-                            <span className="px-3 py-1 bg-amber-50 text-amber-600 text-[10px] font-bold uppercase rounded-full border border-amber-100">{staffing.calculateTotalHours(doctor.id, period)} Weighted Hours</span>
+            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-start justify-between gap-6">
+                <div className="flex-1 space-y-6">
+                    <div className="flex items-center space-x-6">
+                        <div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center text-3xl font-bold text-blue-600 border border-blue-100">{doctor.name.charAt(0)}</div>
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-900">{doctor.name}</h2>
+                            <div className="flex flex-wrap items-center gap-3 mt-2">
+                                <span className="px-3 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase rounded-full">ID: {doctor.id}</span>
+                                <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-bold uppercase rounded-full">Role: Resident</span>
+                                <span className="px-3 py-1 bg-amber-50 text-amber-600 text-[10px] font-bold uppercase rounded-full border border-amber-100">{totalHours} Weighted Hours</span>
+                            </div>
                         </div>
                     </div>
+                    {totalHours > 0 && (
+                        <div className="max-w-md bg-slate-50 p-4 rounded-xl border border-slate-100">
+                            <div className="flex justify-between text-[10px] font-bold uppercase text-slate-500 mb-2">
+                                <span>Ward: {wardHours}h</span>
+                                <span>ER Call: {erHours}h</span>
+                            </div>
+                            <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-200">
+                                <div className="h-full bg-blue-500 transition-all" style={{ width: `${100 - erPercent}%` }} />
+                                <div className="h-full bg-amber-500 transition-all" style={{ width: `${erPercent}%` }} />
+                            </div>
+                        </div>
+                    )}
                 </div>
                 {isSelf && user.id !== 'root' && (
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 w-full md:w-auto">
@@ -505,186 +603,50 @@ function ProfileView({ staffing, user, targetDoctorId }: { staffing: any, user: 
 }
 
 const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) => {
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const [targetPeriod, setTargetPeriod] = useState(currentMonth);
-  const [showEquityResults, setShowEquityResults] = useState(false);
-  const [excludedWardIds, setExcludedWardIds] = useState<string[]>([]);
-  const [showExclusionDrop, setShowExclusionDrop] = useState(false);
-
   const myAssignment = staffing.assignments.filter((a: any) => a.doctorIds.includes(user.id)).sort((a: any, b: any) => b.period.localeCompare(a.period))[0];
   const isAdmin = user.role === 'admin';
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentDay = new Date().getDate();
+  const targetPeriod = currentMonth; // or keep existing targetPeriod logic if it existed, wait, Dashboard had targetPeriod state? No. Let's add it.
+  const [generatePeriod, setGeneratePeriod] = useState(currentMonth);
 
-  const sortedByHours = useMemo(() => {
-    if (!isAdmin) return [];
-    
-    // Get all assignments for this period to find primary wards
-    const periodAssignments = staffing.assignments.filter((a: any) => a.period === targetPeriod);
-    
-    return staffing.doctors
-        .filter((d: Doctor) => {
-            const assignment = periodAssignments.find((a: any) => a.doctorIds.includes(d.id));
-            return !assignment || !excludedWardIds.includes(assignment.wardId);
-        })
-        .map((d: Doctor) => ({
-            ...d,
-            totalHours: staffing.calculateTotalHours(d.id, targetPeriod)
-        })).sort((a: any, b: any) => b.totalHours - a.totalHours);
-  }, [staffing.doctors, targetPeriod, isAdmin, staffing.calculateTotalHours, excludedWardIds, staffing.assignments]);
-
-  const topPerformer = sortedByHours[0];
-  const lowPerformer = sortedByHours[sortedByHours.length - 1];
-
-  const topPerformerAssignment = topPerformer ? staffing.assignments.find((a: any) => a.period === targetPeriod && a.doctorIds.includes(topPerformer.id)) : null;
-  const lowPerformerAssignment = lowPerformer ? staffing.assignments.find((a: any) => a.period === targetPeriod && a.doctorIds.includes(lowPerformer.id)) : null;
+  const upcomingShifts = useMemo(() => {
+      if (isAdmin) return [];
+      return staffing.shifts
+          .filter((s: ShiftRecord) => s.doctorId === user.id && s.period === currentMonth && s.day >= currentDay)
+          .sort((a: any, b: any) => a.day - b.day)
+          .slice(0, 4);
+  }, [staffing.shifts, user.id, isAdmin, currentMonth, currentDay]);
 
   return (
     <div className="space-y-8">
       <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden"><div className="relative z-10"><h2 className="text-2xl font-bold">Hospital Overview</h2><p className="text-blue-100 mt-2 text-sm max-w-lg">{user.role === 'admin' ? "Full Control Mode." : myAssignment ? `Assigned to ${staffing.wardMap.get(myAssignment.wardId)?.name} for ${myAssignment.period}.` : "No active rotation."}</p></div><Hospital className="absolute right-[-20px] bottom-[-20px] w-64 h-64 text-white/10 rotate-12" /></div>
       
-      {isAdmin && sortedByHours.length > 0 && (
-          <div className="space-y-6">
-          <div className={`bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm relative group transition-all ${showExclusionDrop ? 'z-40' : 'z-10'}`}>
-                  <div className="absolute inset-0 overflow-hidden rounded-[32px] pointer-events-none">
-                      <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:scale-110 transition-all">
-                          <Scale className="w-48 h-48 text-slate-900" />
-                      </div>
-                  </div>
-                  
-                  {/* Exclusion Dropdown */}
-                  <div className="absolute top-6 right-6 z-30">
-                      <div className="relative">
-                          <button 
-                            onClick={() => setShowExclusionDrop(!showExclusionDrop)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-bold uppercase text-slate-500 hover:bg-white hover:text-blue-600 transition-all"
-                          >
-                              <Shield className="w-3.5 h-3.5" />
-                              Exclude Wards ({excludedWardIds.length})
-                          </button>
-                          
-                          {showExclusionDrop && (
-                              <>
-                                  <div className="fixed inset-0 z-10" onClick={() => setShowExclusionDrop(false)} />
-                                  <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-2xl z-20 p-4 max-h-[300px] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
-                                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
-                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Select Exempt Units</span>
-                                          <button onClick={() => setExcludedWardIds([])} className="text-[8px] font-bold text-blue-600 uppercase">Clear All</button>
-                                      </div>
-                                      <div className="space-y-1">
-                                          {staffing.wards.map((w: Ward) => (
-                                              <label key={w.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors group/item">
-                                                  <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${excludedWardIds.includes(w.id) ? 'bg-blue-600 border-blue-600' : 'border-slate-300 bg-white group-hover/item:border-blue-400'}`}>
-                                                      {excludedWardIds.includes(w.id) && <Check className="w-2.5 h-2.5 text-white" />}
-                                                  </div>
-                                                  <input 
-                                                      type="checkbox" 
-                                                      className="hidden" 
-                                                      checked={excludedWardIds.includes(w.id)} 
-                                                      onChange={(e) => {
-                                                          if (e.target.checked) setExcludedWardIds([...excludedWardIds, w.id]);
-                                                          else setExcludedWardIds(excludedWardIds.filter(id => id !== w.id));
-                                                      }} 
-                                                  />
-                                                  <span className={`text-[11px] font-bold ${excludedWardIds.includes(w.id) ? 'text-slate-900' : 'text-slate-500'}`}>{w.name}</span>
-                                              </label>
-                                          ))}
-                                      </div>
-                                  </div>
-                              </>
-                          )}
-                      </div>
-                  </div>
-
-                  <div className="relative z-10">
-                      <div className="flex items-center gap-4 mb-6">
-                          <div className="bg-slate-900 p-3 rounded-2xl text-white shadow-lg shadow-slate-900/20"><Activity className="w-6 h-6" /></div>
-                          <div>
-                              <h3 className="text-xl font-bold text-slate-800">Operational Equity Command</h3>
-                              <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Personnel Workload Balancing Engine</p>
-                          </div>
-                      </div>
-                      
-                      {!showEquityResults ? (
-                          <div className="space-y-4">
-                              <p className="text-sm text-slate-500 max-w-md">Analyze the current clinical rotation to identify workload disparities and ensure equitable duty distribution across all departments.</p>
-                              <button 
-                                  onClick={() => setShowEquityResults(true)}
-                                  className="bg-blue-600 text-white px-8 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/20 active:scale-95"
-                              >
-                                  Run Departmental Equity Audit
-                              </button>
-                          </div>
-                      ) : (
-                          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 bg-slate-50 rounded-2xl border border-slate-100">
-                                  <div>
-                                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Audit Result</p>
-                                      <div className="flex items-center gap-3">
-                                          <div className={`text-3xl font-black ${(topPerformer.totalHours - lowPerformer.totalHours) > 12 ? 'text-amber-600' : 'text-green-600'}`}>
-                                              {topPerformer.totalHours - lowPerformer.totalHours}h
-                                          </div>
-                                          <div className="text-[10px] font-bold text-slate-500 uppercase leading-tight">Workload<br/>Variance</div>
-                                      </div>
-                                  </div>
-                                  
-                                  <div className="flex flex-wrap gap-3">
-                                      {(topPerformer.totalHours - lowPerformer.totalHours) > 12 ? (
-                                          <button 
-                                              onClick={() => { if(confirm(`Variance is ${topPerformer.totalHours - lowPerformer.totalHours}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod, excludedWardIds); }}
-                                              className="bg-amber-600 text-white px-6 py-3 rounded-xl text-[10px] font-bold uppercase hover:bg-amber-700 transition-all shadow-lg shadow-amber-600/20 flex items-center gap-2"
-                                          >
-                                              <RefreshCw className={`w-3.5 h-3.5 ${staffing.syncing ? 'animate-spin' : ''}`} />
-                                              Execute Auto-Balance
-                                          </button>
-                                      ) : (
-                                          <div className="flex items-center gap-2 px-6 py-3 bg-green-100 text-green-700 rounded-xl text-[10px] font-bold uppercase">
-                                              <CheckCircle className="w-3.5 h-3.5" />
-                                              Distribution Optimal
-                                          </div>
-                                      )}
-                                      <button onClick={() => setShowEquityResults(false)} className="px-6 py-3 border border-slate-200 text-slate-400 rounded-xl text-[10px] font-bold uppercase hover:bg-white hover:text-slate-600 transition-all">Dismiss</button>
-                                  </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><StatCard label="Total Staff" value={staffing.doctors.length} icon={<Users className="w-5 h-5 text-blue-600" />} /><StatCard label="Monthly Wards" value={staffing.wards.length} icon={<Hospital className="w-5 h-5 text-blue-600" />} /><StatCard label="Total Rotations" value={staffing.assignments.length} icon={<Archive className="w-5 h-5 text-blue-600" />} /><StatCard label="Archives" value={new Set(staffing.assignments.map((a: any) => a.period)).size} icon={<Calendar className="w-5 h-5 text-blue-600" />} /></div>
+      
+      {!isAdmin && upcomingShifts.length > 0 && (
+          <div className="technical-card p-6">
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Clock className="w-4 h-4 text-blue-600" /> My Upcoming Shifts ({currentMonth})</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                  {upcomingShifts.map((s: ShiftRecord) => {
+                      const isER = s.wardId.startsWith('er-');
+                      return (
+                          <div key={s.id} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col justify-between shadow-sm hover:border-blue-300 transition-colors">
+                              <div className="flex items-center justify-between mb-3">
+                                  <span className="text-xs font-black text-slate-400">DAY {s.day}</span>
+                                  {isER ? <Activity className="w-4 h-4 text-amber-500" /> : <Hospital className="w-4 h-4 text-blue-500" />}
+                              </div>
+                              <div>
+                                  <p className="text-sm font-bold text-slate-800 line-clamp-1">{isER ? (s.wardId === 'er-referral' ? 'REFERRAL' : s.wardId.replace('er-', '').toUpperCase()) : staffing.wardMap.get(s.wardId)?.name}</p>
+                                  <p className="text-[10px] font-bold uppercase text-slate-400 tracking-widest mt-1">{isER ? 'ER Call' : `Slot ${s.slotIndex + 1}`}</p>
                               </div>
                           </div>
-                      )}
-                  </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
-                      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Activity className="w-24 h-24 text-blue-600" /></div>
-                      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowLeft className="w-4 h-4 text-blue-600 rotate-90" /> Peak Workload</h3>
-                      <div className="flex items-center gap-4">
-                          <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-xl font-bold text-blue-600 border border-blue-100 cursor-pointer hover:bg-blue-600 hover:text-white transition-all" onClick={() => onNavigate(topPerformer.id)}>{topPerformer.name.charAt(0)}</div>
-                          <div>
-                              <p className="text-lg font-bold text-slate-800 hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(topPerformer.id)}>{topPerformer.name}</p>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">{staffing.wardMap.get(topPerformerAssignment?.wardId)?.name || 'Float/Unassigned'}</p>
-                              <div className="flex items-center gap-2">
-                                  <span className="text-2xl font-black text-blue-600">{topPerformer.totalHours}</span>
-                                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mt-1">Weighted Hours</span>
-                              </div>
-                          </div>
-                      </div>
-                  </div>
-                  <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
-                      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Clock className="w-24 h-24 text-green-600" /></div>
-                      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowLeft className="w-4 h-4 text-green-600 -rotate-90" /> Lowest Workload</h3>
-                      <div className="flex items-center gap-4">
-                          <div className="w-14 h-14 bg-green-50 rounded-2xl flex items-center justify-center text-xl font-bold text-green-600 border border-green-100 cursor-pointer hover:bg-green-600 hover:text-white transition-all" onClick={() => onNavigate(lowPerformer.id)}>{lowPerformer.name.charAt(0)}</div>
-                          <div>
-                              <p className="text-lg font-bold text-slate-800 hover:text-green-600 cursor-pointer transition-colors" onClick={() => onNavigate(lowPerformer.id)}>{lowPerformer.name}</p>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">{staffing.wardMap.get(lowPerformerAssignment?.wardId)?.name || 'Float/Unassigned'}</p>
-                              <div className="flex items-center gap-2">
-                                  <span className="text-2xl font-black text-green-600">{lowPerformer.totalHours}</span>
-                                  <span className="text-[10px] font-bold text-green-400 uppercase tracking-widest mt-1">Weighted Hours</span>
-                              </div>
-                          </div>
-                      </div>
-                  </div>
+                      );
+                  })}
               </div>
           </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><StatCard label="Total Staff" value={staffing.doctors.length} icon={<Users className="w-5 h-5 text-blue-600" />} /><StatCard label="Monthly Wards" value={staffing.wards.length} icon={<Hospital className="w-5 h-5 text-blue-600" />} /><StatCard label="Total Rotations" value={staffing.assignments.length} icon={<Archive className="w-5 h-5 text-blue-600" />} /><StatCard label="Archives" value={new Set(staffing.assignments.map((a: any) => a.period)).size} icon={<Calendar className="w-5 h-5 text-blue-600" />} /></div>
       {user.role === 'admin' && (
         <div className="technical-card p-8 border-blue-100 ring-1 ring-blue-50 flex items-center justify-between gap-8">
           <div>
@@ -692,10 +654,10 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
             <p className="text-xs text-slate-400">Initialize the personnel pool for each ward for the next rotation cycle.</p>
           </div>
           <div className="flex gap-4">
-            <input type="month" className="text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl" value={targetPeriod} onChange={(e) => setTargetPeriod(e.target.value)} />
-            <button disabled={staffing.syncing} onClick={() => { if(confirm(`Generate monthly pool for ${targetPeriod}?`)) staffing.generateMonthlyDispatch(targetPeriod); }} className="btn-primary px-8">Generate Personnel Pool</button>
+            <input type="month" className="text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl" value={generatePeriod} onChange={(e) => setGeneratePeriod(e.target.value)} />
+            <button disabled={staffing.syncing} onClick={() => { if(confirm(`Generate monthly pool for ${generatePeriod}?`)) staffing.generateMonthlyDispatch(generatePeriod); }} className="btn-primary px-8">Generate Personnel Pool</button>
             <button onClick={() => {
-                const periodAssignments = staffing.assignments.filter((a: Assignment) => a.period === targetPeriod);
+                const periodAssignments = staffing.assignments.filter((a: Assignment) => a.period === generatePeriod);
                 if (periodAssignments.length === 0) { alert('No dispatch found for this period.'); return; }
                 const gridRows: any[] = [];
                 let maxDocs = 0; const wardToDocs: Record<string, string[]> = {};
@@ -705,13 +667,13 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
                     wardToDocs[w.name] = docNames; maxDocs = Math.max(maxDocs, docNames.length);
                 });
                 for (let i = 0; i < maxDocs; i++) {
-                    const row: any = { 'Month': i === 0 ? targetPeriod : '' };
+                    const row: any = { 'Month': i === 0 ? generatePeriod : '' };
                     staffing.wards.forEach(w => { row[w.name] = wardToDocs[w.name][i] || ''; });
                     gridRows.push(row);
                 }
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(gridRows), "Monthly Dispatch");
-                XLSX.writeFile(wb, `Dispatch_${targetPeriod}.xlsx`);
+                XLSX.writeFile(wb, `Dispatch_${generatePeriod}.xlsx`);
             }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Download className="w-4 h-4" /> Export Pool</button>
           </div>
         </div>
@@ -871,7 +833,7 @@ const WardsView = React.memo(({ staffing, user }: { staffing: any, user: AuthUse
     );
 });
 
-const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect, onNavigate }: { staffing: any, user: AuthUser, selectedPeriod: string | null, onSelect: (m: string | null) => void, onNavigate: (id: string) => void }) => {
+const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelect, onNavigate }: { staffing: any, user: AuthUser, selectedPeriod: string | null, onSelect: (m: string | null) => void, onNavigate: (id: string) => void }) => {
     const isAdmin = user.role === 'admin';
     const periods = useMemo(() => [...new Set(staffing.assignments.map((a: Assignment) => a.period))].sort((a, b) => b.localeCompare(a)), [staffing.assignments]);
     const [viewMode, setViewMode] = useState<'dispatch' | 'ward' | 'er'>('dispatch');
@@ -902,16 +864,24 @@ const MonthlyArchiveView = ({ staffing, user, selectedPeriod, onSelect, onNaviga
                     <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Select a rotation cycle to view logs</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {periods.length > 0 ? periods.map(p => (
-                        <div key={p} onClick={() => onSelect(p)} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer group">
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="bg-blue-50 p-3 rounded-2xl text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all"><Archive className="w-6 h-6" /></div>
-                                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-600 transition-all" />
+                    {periods.length > 0 ? periods.map(p => {
+                        const pShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === p);
+                        const uniqueDocs = new Set(pShifts.map((s: ShiftRecord) => s.doctorId)).size;
+                        return (
+                            <div key={p} onClick={() => onSelect(p)} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer group">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="bg-blue-50 p-3 rounded-2xl text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all"><Archive className="w-6 h-6" /></div>
+                                    <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-600 transition-all" />
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(p + '-02'))}</h3>
+                                <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1 mb-4">Rotation {p}</p>
+                                <div className="flex items-center gap-4 pt-4 border-t border-slate-50">
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><Activity className="w-3.5 h-3.5" /> {pShifts.length} Shifts</div>
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><Users className="w-3.5 h-3.5" /> {uniqueDocs} Staff</div>
+                                </div>
                             </div>
-                            <h3 className="text-lg font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(p + '-02'))}</h3>
-                            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Rotation {p}</p>
-                        </div>
-                    )) : (
+                        );
+                    }) : (
                         <div className="col-span-full py-20 text-center bg-white rounded-3xl border border-slate-100 border-dashed">
                             <Archive className="w-12 h-12 text-slate-200 mx-auto mb-4" />
                             <p className="text-slate-400 text-sm italic">No archived rotations found yet.</p>
@@ -1035,5 +1005,219 @@ const AssignmentsView = React.memo(({ staffing }: { staffing: any }) => {
     return (<div className="space-y-6"><div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm"><h2 className="text-xl font-bold text-slate-800">Dispatch History</h2></div><div className="technical-card overflow-hidden"><table className="technical-grid"><thead><tr className="bg-slate-50/50"><th className="col-header">Period</th><th className="col-header">Ward</th><th className="col-header">Personnel Pool</th></tr></thead><tbody className="text-sm divide-y divide-slate-100">{staffing.assignments.slice().reverse().map((a: Assignment) => (<tr key={a.id}><td className="px-6 py-4 text-[10px] font-mono text-blue-600 font-bold uppercase">{a.period}</td><td className="px-6 py-4 font-semibold text-slate-800">{staffing.wardMap.get(a.wardId)?.name}</td><td className="px-6 py-4"><div className="flex flex-wrap gap-1.5 font-mono text-[9px]">{a.doctorIds.map(id => (<span key={id} className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-bold uppercase">{staffing.doctorMap.get(id)?.name}</span>))}</div></td></tr>))}</tbody></table></div></div>);
 });
 
-function NavItem({ active, onClick, label, icon }: { active: boolean, onClick: () => void, label: string, icon: React.ReactNode }) { return (<div onClick={onClick} className={`sidebar-nav-item flex items-center space-x-3 px-4 py-2.5 rounded-lg cursor-pointer transition-all ${active ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><div className={`${active ? 'text-white' : 'text-slate-500'}`}>{icon}</div><span className="text-sm font-medium">{label}</span></div>); }
 function StatCard({ label, value, icon }: { label: string, value: number, icon: React.ReactNode }) { return (<div className="bg-white border border-slate-200 rounded-xl p-6 flex items-start justify-between shadow-sm hover:shadow-md transition-shadow"><div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">{label}</p><p className="text-3xl font-bold text-slate-900">{value}</p></div><div className="bg-blue-50 p-2.5 rounded-lg">{icon}</div></div>); }
+
+const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavigate: (id: string) => void }) => {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const [targetPeriod, setTargetPeriod] = useState(currentMonth);
+    const [excludedWardIds, setExcludedWardIds] = useState<string[]>(() => {
+        const saved = localStorage.getItem('wardstaffer_excluded_wards');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [showExclusionDrop, setShowExclusionDrop] = useState(false);
+
+    useEffect(() => {
+        localStorage.setItem('wardstaffer_excluded_wards', JSON.stringify(excludedWardIds));
+    }, [excludedWardIds]);
+
+    const sortedDoctors = useMemo(() => {
+        const periodAssignments = staffing.assignments.filter((a: any) => a.period === targetPeriod);
+        
+        return staffing.doctors
+            .map((d: Doctor) => {
+                const assignment = periodAssignments.find((a: any) => a.doctorIds.includes(d.id));
+                const isExcluded = assignment && excludedWardIds.includes(assignment.wardId);
+                return {
+                    ...d,
+                    currentWard: assignment ? staffing.wardMap.get(assignment.wardId)?.name : 'Float/Unassigned',
+                    isExcluded,
+                    totalHours: staffing.calculateTotalHours(d.id, targetPeriod)
+                };
+            })
+            .sort((a: any, b: any) => {
+                if (a.isExcluded !== b.isExcluded) return a.isExcluded ? 1 : -1;
+                return b.totalHours - a.totalHours;
+            });
+    }, [staffing.doctors, targetPeriod, staffing.calculateTotalHours, excludedWardIds, staffing.assignments, staffing.wardMap]);
+
+    const activeStats = sortedDoctors.filter(d => !d.isExcluded);
+    const maxDoc = activeStats[0];
+    const minDoc = activeStats[activeStats.length - 1];
+    const variance = maxDoc && minDoc ? maxDoc.totalHours - minDoc.totalHours : 0;
+
+    return (
+        <div className="space-y-8 pb-20">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 className="text-2xl font-bold text-slate-800">Equity Engine</h2>
+                    <p className="text-sm text-slate-500">Manage clinical workload distribution and departmental exemptions.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                    <input 
+                        type="month" 
+                        value={targetPeriod} 
+                        onChange={(e) => setTargetPeriod(e.target.value)}
+                        className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <div className="relative">
+                        <button 
+                            onClick={() => setShowExclusionDrop(!showExclusionDrop)}
+                            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg"
+                        >
+                            <Shield className="w-4 h-4" />
+                            Exemptions ({excludedWardIds.length})
+                        </button>
+                        {showExclusionDrop && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setShowExclusionDrop(false)} />
+                                <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 p-4 max-h-[400px] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+                                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Exclude Units from Audit</span>
+                                        <button onClick={() => setExcludedWardIds([])} className="text-[10px] font-bold text-blue-600 uppercase hover:underline">Clear</button>
+                                    </div>
+                                    <div className="space-y-1">
+                                        {staffing.wards.map((w: Ward) => (
+                                            <label key={w.id} className="flex items-center gap-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors group/item">
+                                                <div className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all ${excludedWardIds.includes(w.id) ? 'bg-blue-600 border-blue-600 shadow-md shadow-blue-600/20' : 'border-slate-300 bg-white group-hover/item:border-blue-400'}`}>
+                                                    {excludedWardIds.includes(w.id) && <Check className="w-3 h-3 text-white" />}
+                                                </div>
+                                                <input 
+                                                    type="checkbox" 
+                                                    className="hidden" 
+                                                    checked={excludedWardIds.includes(w.id)} 
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) setExcludedWardIds([...excludedWardIds, w.id]);
+                                                        else setExcludedWardIds(excludedWardIds.filter(id => id !== w.id));
+                                                    }} 
+                                                />
+                                                <span className={`text-xs font-bold ${excludedWardIds.includes(w.id) ? 'text-slate-900' : 'text-slate-500'}`}>{w.name}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-6">
+                    <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /> Clinical Workload Registry</h3>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">{activeStats.length} Included / {excludedWardIds.length} Exempt</span>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead>
+                                    <tr className="bg-white border-b border-slate-100">
+                                        <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Physician</th>
+                                        <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Primary Unit</th>
+                                        <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Weighted Hours</th>
+                                        <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {sortedDoctors.map((d: any) => (
+                                        <tr key={d.id} className={`group hover:bg-slate-50 transition-colors ${d.isExcluded ? 'opacity-40 grayscale' : ''}`}>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 group-hover:bg-blue-600 group-hover:text-white transition-all cursor-pointer" onClick={() => onNavigate(d.id)}>{d.name.charAt(0)}</div>
+                                                    <span className="text-sm font-bold text-slate-700 hover:text-blue-600 cursor-pointer transition-colors" onClick={() => onNavigate(d.id)}>{d.name}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <span className="text-xs font-medium text-slate-500">{d.currentWard}</span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div className={`h-full transition-all duration-1000 ${d.totalHours > 180 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${Math.min((d.totalHours / 250) * 100, 100)}%` }} />
+                                                    </div>
+                                                    <span className="text-sm font-black text-slate-900">{d.totalHours}h</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                {d.isExcluded ? (
+                                                    <span className="text-[8px] font-bold bg-slate-200 text-slate-500 px-2 py-1 rounded uppercase tracking-widest">Exempt</span>
+                                                ) : (
+                                                    <span className={`text-[8px] font-bold px-2 py-1 rounded uppercase tracking-widest ${d.totalHours > 180 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>
+                                                        {d.totalHours > 180 ? 'Peak' : 'Active'}
+                                                    </span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="space-y-6">
+                    <div className="bg-slate-900 rounded-[32px] p-8 text-white shadow-2xl relative overflow-hidden group">
+                        <Activity className="absolute right-[-20px] top-[-20px] w-48 h-48 text-white/5 rotate-12 group-hover:scale-110 transition-transform duration-700" />
+                        <div className="relative z-10">
+                            <h3 className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-6">Equity Control</h3>
+                            <div className="space-y-8">
+                                <div>
+                                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-2">Workload Variance</p>
+                                    <div className="flex items-end gap-3">
+                                        <span className={`text-5xl font-black ${variance > 12 ? 'text-amber-400' : 'text-green-400'}`}>{variance}h</span>
+                                        <span className="text-xs text-slate-400 mb-2 font-medium">Weighted Gap</span>
+                                    </div>
+                                </div>
+                                
+                                <div className="space-y-4">
+                                    <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                                        <p className="text-xs text-slate-300 leading-relaxed italic">
+                                            {variance > 12 
+                                                ? "Significant disparity detected. Auto-balance is recommended to redistribute ER shifts from peak clinicians to those with lower volume."
+                                                : "Workload distribution is currently within equitable thresholds. No intervention required."}
+                                        </p>
+                                    </div>
+
+                                    {variance > 12 ? (
+                                        <button 
+                                            onClick={() => { if(confirm(`Variance is ${variance}h. Execute auto-balance for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod, excludedWardIds); }}
+                                            className="w-full bg-blue-600 text-white py-4 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-600/30 flex items-center justify-center gap-3 active:scale-95"
+                                        >
+                                            <RefreshCw className={`w-4 h-4 ${staffing.syncing ? 'animate-spin' : ''}`} />
+                                            Execute Auto-Balance
+                                        </button>
+                                    ) : (
+                                        <div className="w-full bg-green-500/20 text-green-400 py-4 rounded-2xl text-xs font-bold uppercase tracking-widest border border-green-500/30 flex items-center justify-center gap-3">
+                                            <CheckCircle className="w-4 h-4" />
+                                            System Balanced
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm">
+                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2"><Scale className="w-4 h-4 text-blue-600" /> Metric Configuration</h3>
+                        <div className="space-y-6">
+                            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <div>
+                                    <p className="text-sm font-bold text-slate-800">Referral Multiplier</p>
+                                    <p className="text-[10px] text-slate-400 uppercase">Weight: 24.0x</p>
+                                </div>
+                                <div className="w-10 h-10 bg-white rounded-xl border border-slate-200 flex items-center justify-center"><Check className="w-5 h-5 text-green-500" /></div>
+                            </div>
+                            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <div>
+                                    <p className="text-sm font-bold text-slate-800">ER Shift Weight</p>
+                                    <p className="text-[10px] text-slate-400 uppercase">Weight: 12.0x</p>
+                                </div>
+                                <div className="w-10 h-10 bg-white rounded-xl border border-slate-200 flex items-center justify-center"><Check className="w-5 h-5 text-green-500" /></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});

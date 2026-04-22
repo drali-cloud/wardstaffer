@@ -1,5 +1,14 @@
 import express from 'express';
 import { neon } from '@neondatabase/serverless';
+import crypto from 'crypto';
+
+const SALT = 'wardstaffer_v1_salt';
+const hashPassword = (pass) => {
+    if (!pass) return null;
+    // Check if already hashed (hex string of 128 chars for scrypt 64-byte)
+    if (/^[0-9a-f]{128}$/.test(pass)) return pass;
+    return crypto.scryptSync(pass, SALT, 64).toString('hex');
+};
 
 const app = express();
 app.use(express.json());
@@ -121,14 +130,21 @@ app.get('/api/doctors', async (req, res) => {
   try {
     const sql = getSql();
     const rows = await sql('SELECT * FROM doctors ORDER BY name ASC');
-    res.json(rows.map(r => ({ ...r, previousWards: JSON.parse(r.previousWards) })));
+    res.json(rows.map(r => {
+        const { password, ...rest } = r;
+        return { ...rest, previousWards: JSON.parse(r.previousWards) };
+    }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/doctors', async (req, res) => {
   await getTablesReady();
   const { id, name, gender, password, previousWards } = req.body;
-  const doc = { id, name, gender, password: password || '11111111', previousWards: previousWards || [] };
+  const doc = { 
+      id, name, gender, 
+      password: hashPassword(password || '11111111'), 
+      previousWards: previousWards || [] 
+  };
   if (isUsingMock) {
     mockDb.doctors.push(doc);
     return res.status(201).json({ success: true });
@@ -152,8 +168,11 @@ app.put('/api/doctors/:id', async (req, res) => {
   }
   try {
     // If password not provided in edit, we should keep existing. 
-    // In this simple implementation, we'll assume it's passed or handled in upsert.
-    await upsertDoctor({ id: req.params.id, name, gender, password, previousWards });
+    await upsertDoctor({ 
+        id: req.params.id, name, gender, 
+        password: password ? hashPassword(password) : undefined, 
+        previousWards 
+    });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -168,6 +187,44 @@ app.delete('/api/doctors/:id', async (req, res) => {
     const sql = getSql();
     await sql('DELETE FROM doctors WHERE id = $1', [req.params.id]);
     res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/login', async (req, res) => {
+  await getTablesReady();
+  const { name, password } = req.body;
+  if (!name || !password) return res.status(400).json({ error: 'Name and password required' });
+
+  const cleanName = name.trim().toLowerCase();
+  try {
+    const sql = getSql();
+    let doctor;
+
+    if (isUsingMock) {
+        doctor = mockDb.doctors.find(d => d.name.trim().toLowerCase() === cleanName);
+    } else {
+        const rows = await sql('SELECT * FROM doctors WHERE LOWER(name) = $1', [cleanName]);
+        doctor = rows[0];
+    }
+
+    if (!doctor) return res.status(401).json({ error: 'Physician not found' });
+
+    const hashedInput = hashPassword(password);
+    if (doctor.password !== hashedInput) {
+        // Migration: allow plain text login once and upgrade to hash
+        if (doctor.password === password) {
+            if (isUsingMock) {
+                doctor.password = hashedInput;
+            } else {
+                await sql('UPDATE doctors SET password = $1 WHERE id = $2', [hashedInput, doctor.id]);
+            }
+        } else {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+    }
+
+    const { password: _, ...user } = doctor;
+    res.json({ ...user, role: doctor.id === 'root' ? 'admin' : 'resident' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -251,7 +308,7 @@ app.post('/api/dispatch', async (req, res) => {
     // Use a transaction or parallel execution for reliability
     await Promise.all([
         ...assignments.map(a => upsertAssignment(a)),
-        ...(doctors || []).map(d => upsertDoctor(d))
+        ...(doctors || []).map(d => upsertDoctor({ ...d, password: d.password ? hashPassword(d.password) : undefined }))
     ]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -330,16 +387,25 @@ app.post('/api/shifts', async (req, res) => {
 
 app.delete('/api/shifts', async (req, res) => {
   await getTablesReady();
-  const { period } = req.body;
+  const { period, type } = req.body;
   if (isUsingMock) {
-    if (period) mockDb.shifts = (mockDb.shifts || []).filter(s => s.period !== period);
-    else mockDb.shifts = [];
+    if (period) {
+        mockDb.shifts = (mockDb.shifts || []).filter(s => {
+            if (s.period !== period) return true;
+            if (type === 'er') return !s.wardId.startsWith('er-');
+            if (type === 'ward') return s.wardId.startsWith('er-');
+            return false;
+        });
+    } else mockDb.shifts = [];
     return res.json({ success: true });
   }
   try {
     const sql = getSql();
-    if (period) await sql('DELETE FROM shifts WHERE period = $1', [period]);
-    else await sql('DELETE FROM shifts');
+    if (period) {
+        if (type === 'er') await sql("DELETE FROM shifts WHERE period = $1 AND \"wardId\" LIKE 'er-%'", [period]);
+        else if (type === 'ward') await sql("DELETE FROM shifts WHERE period = $1 AND \"wardId\" NOT LIKE 'er-%'", [period]);
+        else await sql('DELETE FROM shifts WHERE period = $1', [period]);
+    } else await sql('DELETE FROM shifts');
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -367,7 +433,7 @@ app.post('/api/import', async (req, res) => {
   }
   try {
     const promises = [];
-    if (doctors) promises.push(...doctors.map(d => upsertDoctor(d)));
+    if (doctors) promises.push(...doctors.map(d => upsertDoctor({ ...d, password: d.password ? hashPassword(d.password) : undefined })));
     if (wards) promises.push(...wards.map(w => upsertWard(w)));
     await Promise.all(promises);
     res.json({ success: true });

@@ -517,7 +517,7 @@ export function useStaffingData() {
         await fetch('/api/shifts', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ shifts: currentShifts }) 
+            body: JSON.stringify(currentShifts) 
         });
 
         setData(prev => ({ ...prev, shifts: currentShifts }));
