@@ -613,6 +613,34 @@ export function useStaffingData() {
     } catch (e) { alert('History update failed.'); } finally { setSyncing(false); }
   }, [data]);
 
+  const optimizeReferralsForMales = useCallback(async (period: string) => {
+    setSyncing(true);
+    try {
+        let currentShifts = [...data.shifts];
+        const maleDoctors = data.doctors.filter(d => d.gender === 'Male' && d.id !== 'root');
+        const referralShifts = currentShifts.filter(s => s.period === period && s.wardId === 'er-referral');
+
+        for (const shift of referralShifts) {
+            const stats = maleDoctors.map(d => ({
+                id: d.id,
+                hours: calculateTotalHours(d.id, period, currentShifts)
+            })).sort((a, b) => a.hours - b.hours);
+
+            for (const candidate of stats) {
+                const isConflict = currentShifts.some(s => s.period === period && s.doctorId === candidate.id && s.day === shift.day);
+                if (!isConflict) {
+                    currentShifts = currentShifts.map(s => s.id === shift.id ? { ...s, doctorId: candidate.id } : s);
+                    break;
+                }
+            }
+        }
+
+        await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentShifts) });
+        setData(prev => ({ ...prev, shifts: currentShifts }));
+        await addLog('optimize_referrals', `Rearranged male referrals to equalize hours`, period);
+    } catch (e) { alert('Referral optimization failed.'); } finally { setSyncing(false); }
+  }, [data, calculateTotalHours, addLog]);
+
   const addLog = useCallback(async (action: string, details: string, period: string) => {
     const newLog: AuditLog = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -656,5 +684,5 @@ export function useStaffingData() {
     } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
   }, [data.shifts, doctorMap, wardMap, addLog]);
 
-  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory };
+  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory };
 }

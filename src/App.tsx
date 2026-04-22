@@ -1475,6 +1475,23 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                                 System Balanced
                                             </div>
                                         )}
+
+                                        <div className="pt-4 border-t border-white/10 space-y-3">
+                                            <button 
+                                                onClick={() => { if(confirm(`Optimize Referral rotations for male physicians in ${targetPeriod}?`)) staffing.optimizeReferralsForMales(targetPeriod); }}
+                                                className="w-full bg-slate-800 text-slate-300 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-700 transition-all border border-white/5 flex items-center justify-center gap-2"
+                                            >
+                                                <Users className="w-3.5 h-3.5" />
+                                                Rearrange Male Referrals
+                                            </button>
+                                            <button 
+                                                onClick={() => { if(confirm(`Enforce 12h equity gap by redistributing ER calls for ${targetPeriod}?`)) staffing.autoBalanceWorkload(targetPeriod, excludedWardIds); }}
+                                                className="w-full bg-slate-800 text-slate-300 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-700 transition-all border border-white/5 flex items-center justify-center gap-2"
+                                            >
+                                                <RefreshCw className="w-3.5 h-3.5" />
+                                                12h Equity Redistribution
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
