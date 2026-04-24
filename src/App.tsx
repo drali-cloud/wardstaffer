@@ -257,7 +257,17 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                             <p className="text-xs text-slate-400">Calculate or export the daily shift schedule for this period.</p>
                         </div>
                         <div className="flex gap-4">
-                            <button onClick={() => staffing.calculateDailyRoster(period)} className="btn-primary px-8 flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Calculate Shifts</button>
+                            <button 
+                                onClick={() => {
+                                    if (confirm('Generate a team-based ward roster? This will coordinate with your ER call teams and ensure equal shifts. Existing ward shifts will be replaced.')) {
+                                        staffing.calculateTeamWardRoster(period);
+                                    }
+                                }} 
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-8 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-indigo-600/20"
+                            >
+                                <UsersRound className="w-4 h-4" /> Team-Based Shifts
+                            </button>
+                            <button onClick={() => staffing.calculateDailyRoster(period)} className="btn-primary px-8 flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Balanced Roster</button>
                             <button onClick={() => { if (confirm('Clear all shifts for this month? Personnel assignments will be kept.')) staffing.clearRosterByPeriod(period); }} className="bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Trash2 className="w-4 h-4" /> Clear Roster</button>
                             <button onClick={handleExportRoster} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2"><Download className="w-4 h-4" /> Export Roster</button>
                         </div>
@@ -425,7 +435,17 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                                 >
                                     <PowerOff className="w-3.5 h-3.5" /> Deactivate Weekends
                                 </button>
-                                <button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex-1 md:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-3.5 h-3.5" /> Calculate Rotation</button>
+                                <button 
+                                    onClick={() => {
+                                        if (confirm('Generate a team-based round-robin roster? Existing ER shifts for this month will be replaced.')) {
+                                            staffing.calculateTeamRoundRobinERCalls(period);
+                                        }
+                                    }}
+                                    className="flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2.5 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all"
+                                >
+                                    <UsersRound className="w-3.5 h-3.5" /> Team Round-Robin
+                                </button>
+                                <button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex-1 md:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-3.5 h-3.5" /> Calculate Equity</button>
                             </>
                         )}
                     </div>
@@ -764,11 +784,12 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
                                         <span className={`text-[9px] font-bold ${shifts.length > 0 ? 'text-blue-600' : 'text-slate-400'}`}>{d}</span>
                                         <div className="mt-1 space-y-1">
                                             {shifts.map(shift => {
-                                                const isER = shift.wardId.startsWith('er-');
+                                                const ward = staffing.wardMap.get(shift.wardId);
+                                                const isER = shift.wardId.startsWith('er-') || shift.wardId === 'referral';
                                                 return (
-                                                    <div key={shift.id} className={`p-1 rounded text-[7px] font-bold uppercase leading-tight ${isER ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-blue-600 text-white'}`}>
-                                                        <p className="truncate">{isER ? (shift.wardId === 'referral' ? 'REFERRAL' : 'ER CALL') : staffing.wardMap.get(shift.wardId)?.name}</p>
-                                                        <p className="opacity-80">{isER ? getSlotName(shift.slotIndex, shift.wardId) : `Slot ${shift.slotIndex + 1}`}</p>
+                                                    <div key={shift.id} className={`p-1.5 rounded-lg text-[7px] font-black uppercase leading-tight shadow-sm border ${isER ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-600 text-white border-blue-700'}`}>
+                                                        <p className="truncate">{ward?.name || 'Unknown Unit'}</p>
+                                                        <p className={`${isER ? 'text-amber-500' : 'text-blue-200'} text-[6px]`}>{isER ? getSlotName(shift.slotIndex, shift.wardId) : `Slot ${shift.slotIndex + 1}`}</p>
                                                     </div>
                                                 );
                                             })}

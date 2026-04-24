@@ -19,12 +19,10 @@ export function useStaffingData() {
   const allWards = useMemo(() => {
     return [
       ...data.wards,
-      {
-        id: 'referral',
-        name: 'Daily Referral',
-        requirements: { totalDoctors: 0, genderDiversity: 'Specific', requiredMale: 1, requiredFemale: 0, shiftDuration: '24h', staffPerShift: 1 },
-        hiddenFromCalendar: false
-      }
+      { id: 'referral', name: 'Daily Referral', requirements: { totalDoctors: 0, genderDiversity: 'Specific', requiredMale: 1, requiredFemale: 0, shiftDuration: '24h', staffPerShift: 1 }, hiddenFromCalendar: false },
+      { id: 'er-men', name: 'ER Men', requirements: { totalDoctors: 0, genderDiversity: 'Neutral', requiredMale: 0, requiredFemale: 0, shiftDuration: '6h', staffPerShift: 1 }, hiddenFromCalendar: false },
+      { id: 'er-women', name: 'ER Women', requirements: { totalDoctors: 0, genderDiversity: 'Neutral', requiredMale: 0, requiredFemale: 0, shiftDuration: '6h', staffPerShift: 1 }, hiddenFromCalendar: false },
+      { id: 'er-pediatric', name: 'ER Pediatric', requirements: { totalDoctors: 0, genderDiversity: 'Neutral', requiredMale: 0, requiredFemale: 0, shiftDuration: '8h', staffPerShift: 1 }, hiddenFromCalendar: false }
     ] as Ward[];
   }, [data.wards]);
 
@@ -651,6 +649,145 @@ export function useStaffingData() {
         setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'))), ...newERShifts] }));
     } catch (e: any) { alert(`ER calculation failed: ${e.message}`); } finally { setSyncing(false); }
   }, [data.shifts, data.assignments, data.doctors, doctorMap, calculateTotalHours]);
+
+  const calculateTeamRoundRobinERCalls = useCallback(async (period: string) => {
+    setSyncing(true);
+    try {
+        if (teams.length === 0) { alert('No teams found. Define teams in Staff Registry first.'); return; }
+        
+        const daysInMonth = new Date(parseInt(period.split('-')[0]), parseInt(period.split('-')[1]), 0).getDate();
+        const config = erConfig;
+        const deactivatedDays = config.deactivatedDays?.[period] || [];
+        
+        const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+        
+        const categories = [
+            { id: 'referral', slots: slots.referral },
+            { id: 'er-men', slots: slots.men },
+            { id: 'er-women', slots: slots.women },
+            { id: 'er-pediatric', slots: slots.pediatric }
+        ];
+
+        const newERShifts: ShiftRecord[] = [];
+        const sortedTeams = [...teams].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+        let activeDayIndex = 0;
+        for (let day = 1; day <= daysInMonth; day++) {
+            if (deactivatedDays.includes(day)) continue;
+
+            const teamIndex = activeDayIndex % sortedTeams.length;
+            const selectedTeam = sortedTeams[teamIndex];
+            const members = [...selectedTeam.memberIds];
+            
+            if (members.length === 0) {
+                activeDayIndex++; // Move to next team if this one is empty? Or just skip? 
+                // Skip is safer to not lose a day for a valid team.
+                continue; 
+            }
+            activeDayIndex++;
+
+            let memberIdx = 0;
+            categories.forEach(cat => {
+                cat.slots.forEach((staffCount, slotIdx) => {
+                    for (let s = 0; s < staffCount; s++) {
+                        const dId = members[memberIdx % members.length];
+                        newERShifts.push({
+                            id: `er-team-${period}-${day}-${cat.id}-${slotIdx}-${s}`,
+                            period, day, wardId: cat.id, doctorId: dId, slotIndex: slotIdx
+                        });
+                        memberIdx++;
+                    }
+                });
+            });
+        }
+
+        const delResp = await fetch('/api/shifts', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ period, type: 'er' })
+        });
+        if (!delResp.ok) throw new Error('Failed to clear old shifts');
+
+        const saveResp = await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newERShifts) });
+        if (!saveResp.ok) throw new Error('Failed to save roster');
+
+        setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'))), ...newERShifts] }));
+    } catch (e: any) { alert(`Team calculation failed: ${e.message}`); } finally { setSyncing(false); }
+  }, [teams, erConfig, data.shifts]);
+
+  const calculateTeamWardRoster = useCallback(async (period: string) => {
+    setSyncing(true);
+    try {
+        if (teams.length === 0) { alert('Define teams in Staff Registry first.'); return; }
+        const sortedTeams = [...teams].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        const deactivatedDays = erConfig.deactivatedDays?.[period] || [];
+        const daysInMonth = new Date(parseInt(period.split('-')[0]), parseInt(period.split('-')[1]), 0).getDate();
+
+        // 1. Map Days to ER Teams (using same Round-Robin logic)
+        const dayToERTeamId = new Map<number, string>();
+        let activeDayIdx = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+            if (deactivatedDays.includes(d)) continue;
+            const tIdx = activeDayIdx % sortedTeams.length;
+            dayToERTeamId.set(d, sortedTeams[tIdx].id);
+            activeDayIdx++;
+        }
+
+        const newWardShifts: ShiftRecord[] = [];
+        const teamWardShiftCounts: Record<string, number> = {};
+        teams.forEach(t => teamWardShiftCounts[t.id] = 0);
+
+        // 2. Assign Ward Shifts to Available Teams
+        for (let day = 1; day <= daysInMonth; day++) {
+            const erTeamId = dayToERTeamId.get(day);
+            // Teams NOT on ER duty today
+            const availableTeams = sortedTeams.filter(t => t.id !== erTeamId);
+            if (availableTeams.length === 0) continue;
+
+            data.wards.filter(w => !w.parentWardId).forEach((ward, wardIdx) => {
+                // Round-robin available teams for this ward
+                const tIdx = (day + wardIdx) % availableTeams.length;
+                const targetTeam = availableTeams[tIdx];
+                
+                const { staffPerShift, shiftDuration } = ward.requirements;
+                const shiftsPerDay = shiftDuration === '6h' ? 4 : shiftDuration === '12h' ? 2 : 1;
+                
+                for (let sIdx = 0; sIdx < shiftsPerDay; sIdx++) {
+                    for (let p = 0; p < staffPerShift; p++) {
+                        const members = targetTeam.memberIds;
+                        if (members.length === 0) continue;
+                        
+                        // Round-robin members within the team for the day's slots
+                        const dId = members[(sIdx * staffPerShift + p) % members.length];
+                        newWardShifts.push({
+                            id: `ward-team-${period}-${day}-${ward.id}-${sIdx}-${p}`,
+                            period, day, wardId: ward.id, doctorId: dId, slotIndex: sIdx
+                        });
+                    }
+                }
+                teamWardShiftCounts[targetTeam.id]++;
+            });
+        }
+
+        const delResp = await fetch('/api/shifts', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ period, type: 'ward' })
+        });
+        if (!delResp.ok) throw new Error('Failed to clear old ward shifts');
+
+        const saveResp = await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newWardShifts) });
+        if (!saveResp.ok) throw new Error('Failed to save ward roster');
+
+        setData(prev => ({ 
+            ...prev, 
+            shifts: [
+                ...prev.shifts.filter(s => !(s.period === period && !s.wardId.startsWith('er-') && s.wardId !== 'referral')), 
+                ...newWardShifts
+            ] 
+        }));
+    } catch (e: any) { alert(`Team Ward calculation failed: ${e.message}`); } finally { setSyncing(false); }
+  }, [teams, erConfig, data.shifts, data.wards]);
 
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
