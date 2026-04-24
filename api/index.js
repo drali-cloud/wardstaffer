@@ -53,12 +53,20 @@ async function ensureTables() {
   try { await sql(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); } catch(e){}
   try { await sql(`ALTER TABLE assignments ALTER COLUMN "date" DROP NOT NULL`); } catch(e){}
   try { await sql(`ALTER TABLE assignments DROP COLUMN IF EXISTS "date"`); } catch(e){}
-  // Seed root admin if not exists
-  const rootHash = hashPassword('root');
+  // Migration: set default password (11111111) for any doctor with NULL password
+  try {
+    const defaultHash = hashPassword('11111111');
+    await sql(`UPDATE doctors SET password = $1 WHERE password IS NULL AND id != 'root'`, [defaultHash]);
+  } catch(e) { console.warn('Default password migration skipped:', e.message); }
+  // Seed / update root admin credentials (name: 'root', password: 'pass')
+  const rootHash = hashPassword('pass');
   await sql(`
     INSERT INTO doctors (id, name, gender, password, role, "previousWards")
-    VALUES ('root', 'Root Admin', 'Male', $1, 'admin', '[]')
-    ON CONFLICT (id) DO NOTHING
+    VALUES ('root', 'root', 'Male', $1, 'admin', '[]')
+    ON CONFLICT (id) DO UPDATE SET
+      name     = 'root',
+      password = EXCLUDED.password,
+      role     = 'admin'
   `, [rootHash]);
 }
 

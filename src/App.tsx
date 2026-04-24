@@ -538,26 +538,76 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, erC
     );
 }
 
-function LoginPage({ onLogin, isLoading }: { onLogin: (u: string, p: string) => Promise<boolean>, isLoading: boolean }) {
-    const [name, setName] = useState(''); const [pass, setPass] = useState(''); const [error, setError] = useState(false);
+function LoginPage({ onLogin }: { onLogin: (u: string, p: string) => Promise<boolean>, isLoading: boolean }) {
+    const [name, setName] = useState('');
+    const [pass, setPass] = useState('');
+    const [error, setError] = useState('');
+    const [submitting, setSubmitting] = useState(false);
     return (
         <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl p-8 space-y-8">
-                <div className="text-center"><div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg"><Hospital className="w-8 h-8 text-white" /></div><h1 className="text-2xl font-bold text-white">WardStaffer Portal</h1><p className="text-slate-500 text-sm mt-2">Monthly Clinical Dispatch</p></div>
+                <div className="text-center">
+                    <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
+                        <Hospital className="w-8 h-8 text-white" />
+                    </div>
+                    <h1 className="text-2xl font-bold text-white">WardStaffer Portal</h1>
+                    <p className="text-slate-500 text-sm mt-2">Monthly Clinical Dispatch</p>
+                </div>
                 <form onSubmit={async e => {
                     e.preventDefault();
-                    const success = await onLogin(name, pass);
-                    if (success) setError(false);
-                    else setError(true);
+                    if (!name.trim() || !pass) { setError('Please enter your name and password.'); return; }
+                    setSubmitting(true);
+                    setError('');
+                    try {
+                        const success = await onLogin(name.trim(), pass);
+                        if (!success) setError('Invalid physician name or security key.');
+                    } finally {
+                        setSubmitting(false);
+                    }
                 }} className="space-y-6">
                     {error && (
-                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs font-bold text-center animate-shake">
-                            Invalid physician name or security key.
+                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs font-bold text-center">
+                            {error}
                         </div>
                     )}
-                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Staff Name</label><div className="relative flex items-center group"><User className="absolute left-4 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="text" placeholder="Full Registered Name" className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-4.5 px-12 text-sm text-center focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium" value={name} onChange={e => { setName(e.target.value); setError(false); }} disabled={isLoading} /></div></div>
-                    <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Security Access Key</label><div className="relative flex items-center group"><Lock className="absolute left-4 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" /><input type="password" placeholder="أ¢â‚¬آ¢أ¢â‚¬آ¢أ¢â‚¬آ¢أ¢â‚¬آ¢أ¢â‚¬آ¢أ¢â‚¬آ¢أ¢â‚¬آ¢أ¢â‚¬آ¢" className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-4.5 px-12 text-sm text-center focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium" value={pass} onChange={e => { setPass(e.target.value); setError(false); }} disabled={isLoading} /></div></div>
-                    <button type="submit" disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:bg-slate-700 flex items-center justify-center gap-2">{isLoading ? (<><RefreshCw className="w-4 h-4 animate-spin" /> Syncing...</>) : ("Authenticate & Access")}</button>
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Staff Name</label>
+                        <div className="relative flex items-center group">
+                            <User className="absolute left-4 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" />
+                            <input
+                                type="text"
+                                placeholder="Full Registered Name"
+                                className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-3.5 px-12 text-sm text-center focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium"
+                                value={name}
+                                onChange={e => { setName(e.target.value); setError(''); }}
+                                disabled={submitting}
+                                autoComplete="username"
+                            />
+                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Security Access Key</label>
+                        <div className="relative flex items-center group">
+                            <Lock className="absolute left-4 w-5 h-5 text-slate-500 pointer-events-none transition-colors group-focus-within:text-blue-600" />
+                            <input
+                                type="password"
+                                placeholder="Enter your password"
+                                className="w-full bg-white border border-slate-200 text-slate-950 rounded-xl py-3.5 px-12 text-sm text-center focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm font-medium"
+                                value={pass}
+                                onChange={e => { setPass(e.target.value); setError(''); }}
+                                disabled={submitting}
+                                autoComplete="current-password"
+                            />
+                        </div>
+                        <p className="text-[10px] text-slate-600 text-center pt-1">Default password: <span className="font-bold text-slate-500">11111111</span></p>
+                    </div>
+                    <button
+                        type="submit"
+                        disabled={submitting}
+                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                        {submitting ? (<><RefreshCw className="w-4 h-4 animate-spin" /> Authenticating...</>) : 'Authenticate & Access'}
+                    </button>
                 </form>
             </div>
         </div>
