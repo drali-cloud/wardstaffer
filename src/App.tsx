@@ -313,7 +313,7 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                             onDragOver={e => isAdmin && e.preventDefault()}
                             onDrop={() => {
                                 if (draggedTeamId && isAdmin) {
-                                    const wardIds = staffing.wards.filter((w: Ward) => !w.hiddenFromCalendar && !w.parentWardId).map((w: Ward) => w.id);
+                                    const wardIds = staffing.wards.filter((w: Ward) => !w.hiddenFromCalendar && !w.parentWardId && !w.id.startsWith('er-') && w.id !== 'referral').map((w: Ward) => w.id);
                                     staffing.assignTeamToWardsBulk(period, day, wardIds, draggedTeamId);
                                     setDraggedTeamId(null);
                                 }
@@ -321,13 +321,13 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                             className={`bg-white p-2 min-h-[90px] cursor-pointer hover:bg-blue-50 transition-all border-b border-r border-slate-100 group relative ${selectedDay === day ? 'ring-2 ring-blue-500 z-10' : ''} ${draggedTeamId && isAdmin ? 'ring-2 ring-dashed ring-indigo-400 bg-indigo-50/20' : ''}`}>
                             <div className="flex flex-col gap-1 absolute top-1 right-1 items-end z-10">
                                 {erTeam && (
-                                    <div className={`px-2 py-0.5 rounded-md border text-[8px] md:text-[9px] font-black uppercase tracking-wider ${teamColorMap[erTeam.color] || 'bg-slate-600 text-white'} flex items-center gap-1 scale-90 origin-right`}>
-                                        <Activity className="w-2.5 h-2.5" /> ER {erTeam.name.replace('Team ', '')}
+                                    <div className={`px-2 py-1 rounded-md border text-[8px] md:text-[9px] font-black uppercase tracking-wider ${teamColorMap[erTeam.color] || 'bg-slate-600 text-white'} flex items-center gap-1.5 origin-right`}>
+                                        <Activity className="w-5 h-5" /> ER {erTeam.name.replace('Team ', '')}
                                     </div>
                                 )}
                                 {wardTeam && (
-                                    <div className={`px-2 py-0.5 rounded-md border text-[8px] md:text-[9px] font-black uppercase tracking-wider ${teamColorMap[wardTeam.color] || 'bg-slate-600 text-white'} flex items-center gap-1 scale-90 origin-right`}>
-                                        <Hospital className="w-2.5 h-2.5" /> WD {wardTeam.name.replace('Team ', '')}
+                                    <div className={`px-2 py-1 rounded-md border text-[8px] md:text-[9px] font-black uppercase tracking-wider ${teamColorMap[wardTeam.color] || 'bg-slate-600 text-white'} flex items-center gap-1.5 origin-right`}>
+                                        <Hospital className="w-5 h-5" /> WD {wardTeam.name.replace('Team ', '')}
                                     </div>
                                 )}
                             </div>
@@ -467,7 +467,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
             {!archivePeriod && (
                 <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-3 md:gap-4">
-                        <div className="bg-amber-50 p-2 md:p-3 rounded-xl text-amber-600"><Activity className="w-5 h-5 md:w-6 md:h-6" /></div>
+                        <div className="bg-amber-50 p-2 md:p-3 rounded-xl text-amber-600"><Activity className="w-10 h-10 md:w-12 md:h-12" /></div>
                         <div><h2 className="text-lg md:text-xl font-bold text-slate-800 leading-none">ER Call Center</h2><p className="text-[9px] md:text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Operational Duty Control</p></div>
                     </div>
                     <div className="flex items-center justify-between md:justify-end gap-2">
@@ -514,7 +514,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
             {isAdmin && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                        <h3 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest mb-3 flex items-center gap-2"><Hospital className="w-3.5 h-3.5 text-blue-600" /> Source Units</h3>
+                        <h3 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest mb-3 flex items-center gap-2"><Hospital className="w-7 h-7 text-blue-600" /> Source Units</h3>
                         <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-1">
                             {staffing.wards.map((w: Ward) => (
                                 <div key={w.id} draggable={isAdmin} onDragStart={() => setDragSourceWard(w.id)} className={`px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[9px] font-bold text-slate-600 ${isAdmin ? 'cursor-grab active:cursor-grabbing hover:border-blue-400' : ''} transition-all`}>{w.name}</div>
@@ -522,7 +522,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                         </div>
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                        <h3 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest mb-3 flex items-center gap-2"><UsersRound className="w-3.5 h-3.5 text-indigo-600" /> Clinical Teams</h3>
+                        <h3 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest mb-3 flex items-center gap-2"><UsersRound className="w-7 h-7 text-indigo-600" /> Clinical Teams</h3>
                         <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-1">
                             {staffing.teams.map((t: Team) => (
                                 <div key={t.id} draggable={isAdmin} onDragStart={() => setDraggedTeamId(t.id)} className={`px-2 py-1 bg-indigo-50 border border-indigo-200 rounded text-[9px] font-bold text-indigo-600 ${isAdmin ? 'cursor-grab active:cursor-grabbing hover:border-indigo-400' : ''} transition-all`}>{t.name}</div>
@@ -532,7 +532,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                     {(['men', 'women', 'pediatric'] as const).map(cat => (
                         <div key={cat} onDragOver={e => isAdmin && e.preventDefault()} onDrop={() => handleDrop(cat)} className={`bg-white p-4 rounded-2xl border-2 border-dashed border-slate-100 ${isAdmin ? 'hover:border-amber-400 hover:bg-amber-50/20' : ''} transition-all min-h-[100px]`}>
                             <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><Users className="w-3.5 h-3.5 text-amber-500" /> {cat}</h3>
+                                <h3 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><Users className="w-7 h-7 text-amber-500" /> {cat}</h3>
                                 {isAdmin && <button onClick={() => handleClear(cat)} className="text-[8px] font-bold text-slate-300 hover:text-red-500 uppercase">Clear</button>}
                             </div>
                             <div className="flex flex-wrap gap-1.5">
@@ -933,7 +933,7 @@ const DashboardView = React.memo(({ staffing, user, onNavigate, onNavigateToSett
                 <Hospital className="absolute right-[-20px] bottom-[-20px] w-64 h-64 text-white/10 rotate-12 pointer-events-none" />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><StatCard label="Total Staff" value={staffing.doctors.filter((d: Doctor) => d.id !== 'root').length} icon={<Users className="w-5 h-5 text-blue-600" />} /><StatCard label="Monthly Wards" value={staffing.wards.length} icon={<Hospital className="w-5 h-5 text-blue-600" />} /><StatCard label="Total Rotations" value={staffing.assignments.length} icon={<Archive className="w-5 h-5 text-blue-600" />} /><StatCard label="Archives" value={new Set(staffing.assignments.map((a: any) => a.period)).size} icon={<Calendar className="w-5 h-5 text-blue-600" />} /></div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><StatCard label="Total Staff" value={staffing.doctors.filter((d: Doctor) => d.id !== 'root').length} icon={<Users className="w-10 h-10 text-blue-600" />} /><StatCard label="Monthly Wards" value={staffing.wards.length} icon={<Hospital className="w-10 h-10 text-blue-600" />} /><StatCard label="Total Rotations" value={staffing.assignments.length} icon={<Archive className="w-10 h-10 text-blue-600" />} /><StatCard label="Archives" value={new Set(staffing.assignments.map((a: any) => a.period)).size} icon={<Calendar className="w-10 h-10 text-blue-600" />} /></div>
 
             {!isAdmin && upcomingShifts.length > 0 && (
                 <div className="technical-card p-6">
@@ -945,7 +945,7 @@ const DashboardView = React.memo(({ staffing, user, onNavigate, onNavigateToSett
                                 <div key={s.id} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col justify-between shadow-sm hover:border-blue-300 transition-colors">
                                     <div className="flex items-center justify-between mb-3">
                                         <span className="text-xs font-black text-slate-400">DAY {s.day}</span>
-                                        {isER ? <Activity className="w-4 h-4 text-amber-500" /> : <Hospital className="w-4 h-4 text-blue-500" />}
+                                        {isER ? <Activity className="w-8 h-8 text-amber-500" /> : <Hospital className="w-8 h-8 text-blue-500" />}
                                     </div>
                                     <div>
                                         <p className="text-sm font-bold text-slate-800 line-clamp-1">{isER ? s.wardId.replace('er-', '').toUpperCase() : staffing.wardMap.get(s.wardId)?.name}</p>
@@ -1449,7 +1449,7 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
                                 <tr key={w.id} onDragOver={e => isAdmin && e.preventDefault()} onDrop={() => handleDrop(w.id)} className={`hover:bg-slate-50/50 group transition-all ${dragDoctor ? 'bg-blue-50/50 ring-1 ring-blue-100 ring-inset' : ''}`}>
                                     <td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{w.id}</td>
                                     <td className="px-6 py-4 font-semibold text-slate-800">{w.name}</td>
-                                    <td className="px-6 py-4"><div className="flex gap-2"><span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded border border-blue-100 flex items-center gap-1"><Activity className="w-3 h-3" /> {w.requirements.staffPerShift} Doc</span><span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Clock className="w-3 h-3" /> {w.requirements.shiftDuration}</span></div></td>
+                                    <td className="px-6 py-4"><div className="flex gap-2"><span className="px-2 py-1 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded border border-blue-100 flex items-center gap-2"><Activity className="w-6 h-6" /> {w.requirements.staffPerShift} Doc</span><span className="px-2 py-1 bg-slate-100 text-slate-600 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-2"><Clock className="w-6 h-6" /> {w.requirements.shiftDuration}</span></div></td>
                                     <td className="px-6 py-4">
                                         {w.parentWardId ? (
                                             <span className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold uppercase rounded border border-slate-200 flex items-center gap-1"><Link className="w-3 h-3" /> Sub to {staffing.wardMap.get(w.parentWardId)?.name}</span>
@@ -1522,8 +1522,8 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
                                 <h3 className="text-lg font-bold text-slate-800">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(p + '-02'))}</h3>
                                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1 mb-4">Rotation {p}</p>
                                 <div className="flex items-center gap-4 pt-4 border-t border-slate-50">
-                                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><Activity className="w-3.5 h-3.5" /> {pShifts.length} Shifts</div>
-                                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><Users className="w-3.5 h-3.5" /> {uniqueDocs} Staff</div>
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><Activity className="w-7 h-7" /> {pShifts.length} Shifts</div>
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><Users className="w-7 h-7" /> {uniqueDocs} Staff</div>
                                 </div>
                             </div>
                         );
@@ -2506,7 +2506,7 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
 
             {/* ER Capacity Configuration */}
             <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm p-8">
-                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Activity className="w-4 h-4 text-amber-500" /> ER Capacity Configuration</h3>
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Activity className="w-8 h-8 text-amber-500" /> ER Capacity Configuration</h3>
                 <p className="text-sm text-slate-500 mb-6">Configure every aspect of ER scheduling â€” slot counts, time windows, hour weights, fatigue gaps, and referral rules.</p>
 
                 {/* Global ER Settings */}
@@ -2583,7 +2583,7 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
 
             {/* Ward Shift Weights */}
             <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm p-8">
-                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Hospital className="w-4 h-4 text-blue-500" /> Ward Shift Weights</h3>
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Hospital className="w-8 h-8 text-blue-500" /> Ward Shift Weights</h3>
                 <p className="text-sm text-slate-500 mb-6">Override the default hour weighting for each ward shift in equity calculations.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {staffing.wards.filter((w: Ward) => !w.parentWardId).map((w: Ward) => (
