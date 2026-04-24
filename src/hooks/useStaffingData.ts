@@ -789,6 +789,93 @@ export function useStaffingData() {
     } catch (e: any) { alert(`Team Ward calculation failed: ${e.message}`); } finally { setSyncing(false); }
   }, [teams, erConfig, data.shifts, data.wards]);
 
+  const assignTeamToERDay = useCallback(async (period: string, day: number, teamId: string) => {
+    setSyncing(true);
+    try {
+        const team = teams.find(t => t.id === teamId);
+        if (!team) return;
+        const members = team.memberIds;
+        if (members.length === 0) return;
+
+        const config = erConfig;
+        const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+        const categories = [
+            { id: 'referral', slots: slots.referral },
+            { id: 'er-men', slots: slots.men },
+            { id: 'er-women', slots: slots.women },
+            { id: 'er-pediatric', slots: slots.pediatric }
+        ];
+
+        const newDayShifts: ShiftRecord[] = [];
+        let memberIdx = 0;
+        categories.forEach(cat => {
+            cat.slots.forEach((staffCount, slotIdx) => {
+                for (let s = 0; s < staffCount; s++) {
+                    const dId = members[memberIdx % members.length];
+                    newDayShifts.push({
+                        id: `er-manual-${period}-${day}-${cat.id}-${slotIdx}-${s}`,
+                        period, day, wardId: cat.id, doctorId: dId, slotIndex: slotIdx
+                    });
+                    memberIdx++;
+                }
+            });
+        });
+
+        const resp = await fetch('/api/shifts', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(newDayShifts) 
+        });
+        if (!resp.ok) throw new Error('Failed to save team assignment');
+
+        setData(prev => ({ 
+            ...prev, 
+            shifts: [
+                ...prev.shifts.filter(s => !(s.period === period && s.day === day && (s.wardId.startsWith('er-') || s.wardId === 'referral'))), 
+                ...newDayShifts
+            ] 
+        }));
+    } catch (e: any) { alert(`Team assignment failed: ${e.message}`); } finally { setSyncing(false); }
+  }, [teams, erConfig, data.shifts]);
+
+  const assignTeamToWardDay = useCallback(async (period: string, day: number, wardId: string, teamId: string) => {
+    setSyncing(true);
+    try {
+        const team = teams.find(t => t.id === teamId);
+        const ward = data.wards.find(w => w.id === wardId);
+        if (!team || !ward || team.memberIds.length === 0) return;
+
+        const { staffPerShift, shiftDuration } = ward.requirements;
+        const shiftsPerDay = shiftDuration === '6h' ? 4 : shiftDuration === '12h' ? 2 : 1;
+        const newShifts: ShiftRecord[] = [];
+        
+        for (let sIdx = 0; sIdx < shiftsPerDay; sIdx++) {
+            for (let p = 0; p < staffPerShift; p++) {
+                const dId = team.memberIds[(sIdx * staffPerShift + p) % team.memberIds.length];
+                newShifts.push({
+                    id: `ward-manual-${period}-${day}-${ward.id}-${sIdx}-${p}`,
+                    period, day, wardId, doctorId: dId, slotIndex: sIdx
+                });
+            }
+        }
+
+        const resp = await fetch('/api/shifts', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(newShifts) 
+        });
+        if (!resp.ok) throw new Error('Failed to save ward assignment');
+
+        setData(prev => ({ 
+            ...prev, 
+            shifts: [
+                ...prev.shifts.filter(s => !(s.period === period && s.day === day && s.wardId === wardId)), 
+                ...newShifts
+            ] 
+        }));
+    } catch (e: any) { alert(`Ward assignment failed: ${e.message}`); } finally { setSyncing(false); }
+  }, [teams, data.wards]);
+
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
   }, [executeAction]);
