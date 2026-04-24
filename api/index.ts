@@ -153,6 +153,21 @@ app.delete('/api/assignments', async (req, res) => {
   }
 });
 
+// --- Clear Doctors & Wards ---
+app.delete('/api/clear-database', async (req, res) => {
+  try {
+    await getTablesReady();
+    await pool.query('BEGIN');
+    await pool.query('DELETE FROM doctors');
+    await pool.query('DELETE FROM wards');
+    await pool.query('COMMIT');
+    res.json({ success: true });
+  } catch (e: any) {
+    await pool.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Bulk Import ---
 app.post('/api/import', async (req, res) => {
   try {

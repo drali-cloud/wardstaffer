@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Doctor, Ward, Assignment, Gender, ShiftRecord, AuditLog } from '../types';
+import { Doctor, Ward, Assignment, Gender, ShiftRecord, AuditLog, Team } from '../types';
 
 interface StaffingData {
   doctors: Doctor[];
@@ -14,6 +14,7 @@ export function useStaffingData() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[], slots?: any, durations?: any, slotLabels?: any, fatigueGap?: number, balanceThreshold?: number, referralMaleOnly?: boolean, referralBufferDays?: number }>({ men: [], women: [], pediatric: [] });
+  const [teams, setTeams] = useState<Team[]>([]);
 
   const allWards = useMemo(() => {
     return [
@@ -33,12 +34,12 @@ export function useStaffingData() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [docsResp, wardsResp, assignmentsResp, shiftsResp, configResp, logsResp] = await Promise.all([
-        fetch('/api/doctors'), fetch('/api/wards'), fetch('/api/assignments'), fetch('/api/shifts'), fetch('/api/config'), fetch('/api/logs')
+      const [docsResp, wardsResp, assignmentsResp, shiftsResp, configResp, logsResp, teamsResp] = await Promise.all([
+        fetch('/api/doctors'), fetch('/api/wards'), fetch('/api/assignments'), fetch('/api/shifts'), fetch('/api/config'), fetch('/api/logs'), fetch('/api/teams')
       ]);
       if (!docsResp.ok) throw new Error('Sync failed.');
-      const [doctors, wards, assignments, shifts, config, logs] = await Promise.all([
-        docsResp.json(), wardsResp.json(), assignmentsResp.json(), shiftsResp.json(), configResp.json(), logsResp.json()
+      const [doctors, wards, assignments, shifts, config, logs, teamsData] = await Promise.all([
+        docsResp.json(), wardsResp.json(), assignmentsResp.json(), shiftsResp.json(), configResp.json(), logsResp.json(), teamsResp.json()
       ]);
       setData({ 
           doctors: doctors || [], 
@@ -48,6 +49,7 @@ export function useStaffingData() {
           logs: logs || []
       });
       setErConfig(config || { men: [], women: [], pediatric: [] });
+      setTeams(teamsData || []);
     } catch (e) { console.error('Fetch error:', e); } finally { setLoading(false); }
   };
 
@@ -215,6 +217,10 @@ export function useStaffingData() {
           const [year, month] = period.split('-').map(Number);
           const daysInMonth = new Date(year, month, 0).getDate();
 
+          // Build fast team-lookup: doctorId → Team (if any)
+          const doctorTeamMap = new Map<string, Team>();
+          teams.forEach(t => t.memberIds.forEach(id => doctorTeamMap.set(id, t)));
+
           for (const assignment of assignments) {
               const ward = data.wards.find(w => w.id === assignment.wardId);
               if (!ward) continue;
@@ -222,7 +228,6 @@ export function useStaffingData() {
 
               const subordinates = data.wards.filter(w => w.parentWardId === ward.id);
               const subAssignments = assignments.filter(a => subordinates.some(s => s.id === a.wardId));
-              // Ensure pool is unique to prevent bias
               const combinedDoctorPool = Array.from(new Set([...assignment.doctorIds, ...subAssignments.flatMap(a => a.doctorIds)]));
               
               if (combinedDoctorPool.length === 0) continue;
@@ -231,51 +236,70 @@ export function useStaffingData() {
               const shiftsPerDay = shiftDuration === '6h' ? 4 : shiftDuration === '12h' ? 2 : 1;
               const totalDailySlots = shiftsPerDay * staffPerShift;
 
-              // Track shift counts to ensure absolute equality within the month
               const shiftCounts: Record<string, number> = {};
               combinedDoctorPool.forEach(id => shiftCounts[id] = 0);
               let lastDayAssigned = new Set<string>();
 
               for (let day = 1; day <= daysInMonth; day++) {
                   const todayAssigned = new Set<string>();
-                  for (let slot = 0; slot < totalDailySlots; slot++) {
-                      // SELECTION CRITERIA:
-                      // 1. Must not have worked earlier today
-                      // 2. Must not have worked yesterday (12h-24h Rest Period Guard)
-                      // 3. Must be the person with the LEAST shifts assigned so far this month
-                      
-                      let eligible = combinedDoctorPool.filter(id => !todayAssigned.has(id) && !lastDayAssigned.has(id));
-                      
-                      // EMERGENCY FALLBACK: If pool is too small for rest rules, just avoid same-day double shifts
-                      if (eligible.length === 0) {
-                          eligible = combinedDoctorPool.filter(id => !todayAssigned.has(id));
-                      }
-                      
-                      // CRITICAL FALLBACK: If everyone is already working today, allow anyone
-                      if (eligible.length === 0) eligible = combinedDoctorPool;
 
-                      // SORT CRITERIA:
-                      //   1. Least shifts this month (primary — maintains equity)
-                      //   2. Female gender (tiebreaker — females are preferred to accumulate
-                      //      slightly more ward hours; male doctors will compensate via
-                      //      referral calls in the equity engine)
-                      eligible.sort((a, b) => {
-                          const countDiff = shiftCounts[a] - shiftCounts[b];
-                          if (countDiff !== 0) return countDiff;
-                          // Tiebreak: Female = 0, Male = 1 → females sort first
-                          const aScore = doctorMap.get(a)?.gender === 'Female' ? 0 : 1;
-                          const bScore = doctorMap.get(b)?.gender === 'Female' ? 0 : 1;
-                          return aScore - bScore;
-                      });
-                      
-                      const dId = eligible[0];
-                      shiftCounts[dId]++;
-                      
-                      todayAssigned.add(dId);
-                      newShifts.push({ 
-                          id: `${period}-${day}-${ward.id}-${slot}`, 
-                          period, day, wardId: ward.id, slotIndex: slot, doctorId: dId 
-                      });
+                  // Process slots in groups equal to staffPerShift so teams fill a slot together
+                  for (let shiftIdx = 0; shiftIdx < shiftsPerDay; shiftIdx++) {
+                      const slotBase = shiftIdx * staffPerShift;
+                      // Doctors already placed in this time-slot (may be >1 if staffPerShift==2)
+                      const slotMembers: string[] = [];
+
+                      for (let pos = 0; pos < staffPerShift; pos++) {
+                          const globalSlot = slotBase + pos;
+
+                          // If a teammate was already placed in this slot position, fill remaining positions
+                          if (slotMembers.length > 0) {
+                              // Try to find a teammate of the already-placed member
+                              const placedTeam = doctorTeamMap.get(slotMembers[0]);
+                              if (placedTeam) {
+                                  const teammate = placedTeam.memberIds.find(id =>
+                                      id !== slotMembers[0] &&
+                                      combinedDoctorPool.includes(id) &&
+                                      !todayAssigned.has(id)
+                                  );
+                                  if (teammate) {
+                                      slotMembers.push(teammate);
+                                      todayAssigned.add(teammate);
+                                      shiftCounts[teammate] = (shiftCounts[teammate] ?? 0) + 1;
+                                      newShifts.push({
+                                          id: `${period}-${day}-${ward.id}-${globalSlot}`,
+                                          period, day, wardId: ward.id, slotIndex: globalSlot, doctorId: teammate
+                                      });
+                                      continue;
+                                  }
+                              }
+                          }
+
+                          // Standard eligible-pool selection
+                          let eligible = combinedDoctorPool.filter(id => !todayAssigned.has(id) && !lastDayAssigned.has(id));
+                          if (eligible.length === 0) eligible = combinedDoctorPool.filter(id => !todayAssigned.has(id));
+                          if (eligible.length === 0) eligible = combinedDoctorPool;
+
+                          eligible.sort((a, b) => {
+                              const countDiff = shiftCounts[a] - shiftCounts[b];
+                              if (countDiff !== 0) return countDiff;
+                              const aScore = doctorMap.get(a)?.gender === 'Female' ? 0 : 1;
+                              const bScore = doctorMap.get(b)?.gender === 'Female' ? 0 : 1;
+                              return aScore - bScore;
+                          });
+
+                          const dId = eligible[0];
+                          slotMembers.push(dId);
+                          todayAssigned.add(dId);
+                          shiftCounts[dId] = (shiftCounts[dId] ?? 0) + 1;
+                          newShifts.push({
+                              id: `${period}-${day}-${ward.id}-${globalSlot}`,
+                              period, day, wardId: ward.id, slotIndex: globalSlot, doctorId: dId
+                          });
+
+                          // If this doctor is in a team AND staffPerShift has a next position,
+                          // pre-fill it with a teammate (handled in next iteration's `slotMembers` check)
+                      }
                   }
                   lastDayAssigned = todayAssigned;
               }
@@ -297,7 +321,7 @@ export function useStaffingData() {
               alert(`Roster generated for ${daysInMonth} days.`);
           }
       } catch (e) { alert('Roster calculation failed.'); } finally { setSyncing(false); }
-  }, [data.assignments, data.wards, wardMap]);
+  }, [data.assignments, data.wards, wardMap, teams, doctorMap]);
 
   const clearRosterByPeriod = useCallback(async (period: string, type: 'all' | 'er' | 'ward' = 'all') => {
     if (!confirm(`Are you sure you want to delete ${type === 'all' ? 'ALL' : type.toUpperCase()} shifts for ${period}?`)) return;
@@ -463,38 +487,34 @@ export function useStaffingData() {
     setSyncing(true);
     try {
         const daysInMonth = new Date(parseInt(period.split('-')[0]), parseInt(period.split('-')[1]), 0).getDate();
-        const wardShifts = data.shifts.filter(s => s.period === period);
+        // IMPORTANT: Only consider WARD shifts for initial fatigue/availability checks.
+        // We exclude existing er/referral shifts because we are about to replace them.
+        const wardShifts = data.shifts.filter(s => s.period === period && !s.wardId.startsWith('er-') && s.wardId !== 'referral');
         const newERShifts: ShiftRecord[] = [];
         
         const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
         const durations = config.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
         const fatigueGap = config.fatigueGap ?? 12;
         const referralMaleOnly = config.referralMaleOnly !== false;
-        const referralBufferDays = config.referralBufferDays ?? 1; // days free before/after referral
+        const referralBufferDays = config.referralBufferDays ?? 1;
         
         const categories = [
-            { id: 'referral', name: 'Daily Referral', slots: slots.referral, wards: [...config.men, ...config.women, ...config.pediatric], duration: durations.referral ?? 24, maleOnly: referralMaleOnly },
-            { id: 'er-men', name: 'Men', slots: slots.men, wards: config.men, duration: durations.men ?? 6 },
-            { id: 'er-women', name: 'Women', slots: slots.women, wards: config.women, duration: durations.women ?? 6 },
-            { id: 'er-pediatric', name: 'Pediatric', slots: slots.pediatric, wards: config.pediatric, duration: durations.pediatric ?? 8 }
+            { id: 'referral', name: 'Daily Referral', slots: slots.referral, wards: [...(config.men || []), ...(config.women || []), ...(config.pediatric || [])], duration: durations.referral ?? 24, maleOnly: referralMaleOnly },
+            { id: 'er-men', name: 'Men', slots: slots.men, wards: config.men || [], duration: durations.men ?? 6 },
+            { id: 'er-women', name: 'Women', slots: slots.women, wards: config.women || [], duration: durations.women ?? 6 },
+            { id: 'er-pediatric', name: 'Pediatric', slots: slots.pediatric, wards: config.pediatric || [], duration: durations.pediatric ?? 8 }
         ];
 
-        // Track cumulative hours per doctor for the period, starting with ward shifts
-        // Root is excluded from all scheduling — it is a system admin account only
         const hoursMap: Record<string, number> = {};
-        // Separate counters for referral and ER (non-referral) calls — used as primary sort keys
-        // so that a 24h referral block does NOT crowd a doctor out of the ER rotation.
-        const erCallCount: Record<string, number> = {};    // non-referral ER slots only
-        const referralCount: Record<string, number> = {};  // referral slots only
+        const erCallCount: Record<string, number> = {};
+        const referralCount: Record<string, number> = {};
         data.doctors.filter(d => d.id !== 'root').forEach(d => {
             hoursMap[d.id]      = calculateTotalHours(d.id, period, wardShifts);
             erCallCount[d.id]   = 0;
             referralCount[d.id] = 0;
         });
 
-        // Target: 6–10 ER calls per doctor. Hard ceiling prevents extreme overload.
-        const ER_CALL_SOFT_MAX = 10;
-        const ER_CALL_HARD_CAP = 11; // allow +1 overflow only if no other candidate exists
+        const ER_CALL_HARD_CAP = 11;
 
         for (let day = 1; day <= daysInMonth; day++) {
             categories.forEach(cat => {
@@ -508,28 +528,25 @@ export function useStaffingData() {
                 if (poolArray.length === 0) return;
 
                 cat.slots.forEach((staffCount, slotIdx) => {
+                    const slotDuration = cat.duration;
+                    const slotStartHour = 8 + (slotIdx * slotDuration);
+                    const slotEndHour = slotStartHour + slotDuration;
+
                     for (let s = 0; s < staffCount; s++) {
-
-                        // --- Slot time boundaries (hours from day midnight) ---
-                        // Slot 0: 08:00-14:00  Slot 1: 14:00-20:00
-                        // Slot 2: 20:00-02:00  Slot 3: 02:00-08:00
-                        const SLOT_START = [8, 14, 20, 26]; // 26 = 02:00 next-day
-                        const SLOT_END   = [14, 20, 26, 32]; // 32 = 08:00 next-day
-
-                        // Helper: does yesterday's ER shift violate 12h rest before today's slotIdx?
                         const hasERConflictYesterday = (candidate: string): boolean => {
                             return newERShifts.some(prev => {
                                 if (prev.day !== day - 1 || prev.doctorId !== candidate) return false;
-                                const prevEndHour = SLOT_END[prev.slotIndex ?? 0] ?? 24;
-                                const todayStartHour = SLOT_START[slotIdx] ?? 8;
-                                const gap = (todayStartHour + 24) - prevEndHour;
+                                const prevCat = categories.find(c => c.id === prev.wardId);
+                                const prevDuration = prevCat?.duration || 6;
+                                const prevEnd = 8 + ((prev.slotIndex || 0) * prevDuration);
+                                const prevEndAbsolute = prevEnd + prevDuration;
+                                const gap = (slotStartHour + 24) - prevEndAbsolute;
                                 return gap < fatigueGap;
                             });
                         };
 
-                        // Helper: does candidate have any shift within referralBufferDays of a referral?
                         const hasReferralBufferConflict = (candidate: string): boolean => {
-                            if (cat.id !== 'referral') return false; // only applies to referral category
+                            if (cat.id !== 'referral') return false;
                             const allDayShifts = [
                                 ...wardShifts.filter(x => x.doctorId === candidate),
                                 ...newERShifts.filter(x => x.doctorId === candidate)
@@ -540,18 +557,13 @@ export function useStaffingData() {
                             return false;
                         };
 
-                        // Sort helper: for ER slots use erCallCount (not total hours) so referral's
-                        // 24h weight does NOT push doctors out of the ER rotation.
-                        // For referral slots use referralCount so the duty spreads across more males.
                         const sortKey = (id: string) =>
                             cat.id === 'referral' ? referralCount[id] ?? 0 : erCallCount[id] ?? 0;
 
-                        // Hard-cap filter: skip doctors at/above the hard cap for non-referral ER slots
-                        // unless there is absolutely no other choice (handled in Pass 3).
                         const underHardCap = (id: string) =>
                             cat.id === 'referral' || (erCallCount[id] ?? 0) < ER_CALL_HARD_CAP;
 
-                        // Pass 1: Strict (ward 12h rest + ER cross-day 12h rest + referral buffer + hard cap)
+                        // Pass 1: Strict
                         let eligible = poolArray
                             .filter(candidate => {
                                 const doc = doctorMap.get(candidate);
@@ -563,8 +575,7 @@ export function useStaffingData() {
                                 const hasWardShiftTomorrow  = wardShifts.some(x => x.day === day + 1 && x.doctorId === candidate);
                                 const hasOtherERToday       = newERShifts.some(x => x.day === day     && x.doctorId === candidate);
 
-                                // Ward-to-ER 12h rule (existing)
-                                const isNightCall = slotIdx >= 2;
+                                const isNightCall = slotStartHour >= 20;
                                 const yesterdayWardConflict = hasWardShiftYesterday && !isNightCall;
                                 const tomorrowWardConflict  = hasWardShiftTomorrow  && isNightCall;
 
@@ -575,7 +586,7 @@ export function useStaffingData() {
                             })
                             .sort((a, b) => sortKey(a) - sortKey(b));
 
-                        // Pass 2: Relaxed — keep ER cross-day rule but drop ward-rest rules
+                        // Pass 2: Relaxed
                         if (eligible.length === 0) {
                             eligible = poolArray
                                 .filter(candidate => {
@@ -593,7 +604,7 @@ export function useStaffingData() {
                                 .sort((a, b) => sortKey(a) - sortKey(b));
                         }
 
-                        // Pass 3: Last-resort — drop hard cap too; only same-day and referral buffer blocked
+                        // Pass 3: Last-resort
                         if (eligible.length === 0) {
                             eligible = poolArray
                                 .filter(candidate => {
@@ -613,7 +624,6 @@ export function useStaffingData() {
                                 period, day, wardId: cat.id, doctorId: dId, slotIndex: slotIdx
                             });
                             hoursMap[dId] += cat.duration;
-                            // Update per-type counters
                             if (cat.id === 'referral') {
                                 referralCount[dId] = (referralCount[dId] ?? 0) + 1;
                             } else {
@@ -625,7 +635,6 @@ export function useStaffingData() {
             });
         }
 
-        // Persist: wipe old ER + referral shifts for this period, then save the fresh set
         const delResp = await fetch('/api/shifts', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
@@ -638,7 +647,7 @@ export function useStaffingData() {
 
         setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'))), ...newERShifts] }));
     } catch (e: any) { alert(`ER calculation failed: ${e.message}`); } finally { setSyncing(false); }
-  }, [data]);
+  }, [data.shifts, data.assignments, data.doctors, doctorMap, calculateTotalHours]);
 
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
@@ -1127,5 +1136,33 @@ export function useStaffingData() {
     } catch (e) { console.error(e); } finally { setSyncing(false); }
   }, [data.shifts, doctorMap, wardMap, addLog]);
 
-  return { ...data, wards: allWards, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, movePoolDoctor, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict };
+  const updateTeams = useCallback(async (newTeams: Team[]) => {
+    setSyncing(true);
+    try {
+      await fetch('/api/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTeams)
+      });
+      setTeams(newTeams);
+    } catch (e) { alert('Failed to save teams.'); } finally { setSyncing(false); }
+  }, []);
+
+  const clearDatabase = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const resp = await fetch('/api/clear-database', { method: 'DELETE' });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Server error');
+      }
+      setData(prev => ({ ...prev, doctors: [], wards: [] }));
+    } catch (e: any) {
+      alert(`Clear failed: ${e.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+
+  return { ...data, wards: allWards, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, movePoolDoctor, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict, clearDatabase, teams, updateTeams };
 }

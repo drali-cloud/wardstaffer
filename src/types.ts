@@ -77,3 +77,9 @@ export interface ShiftExchange {
   createdAt: string;
   resolvedAt?: string;
 }
+export interface Team {
+  id: string;
+  name: string;
+  color: string; // tailwind color key: 'violet' | 'emerald' | 'rose' | 'amber' | 'cyan' | 'orange'
+  memberIds: string[];
+}
