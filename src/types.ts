@@ -1,11 +1,19 @@
 export type Gender = 'Male' | 'Female';
 
+export interface DoctorRule {
+  id: string;
+  type: 'max_er_shifts' | 'forbidden_days' | 'ward_restriction';
+  value: any;
+}
+
 export interface Doctor {
   id: string;
   name: string;
   gender: Gender;
   password?: string;
+  role?: 'resident' | 'admin';
   previousWards: string[]; // List of ward IDs the doctor has worked in
+  rules?: DoctorRule[];
 }
 
 export interface WardRequirements {
@@ -14,6 +22,7 @@ export interface WardRequirements {
   requiredMale?: number;
   requiredFemale?: number;
   shiftDuration: '6h' | '12h' | '24h';
+  shiftWeight?: number;
   staffPerShift: 1 | 2;
 }
 
