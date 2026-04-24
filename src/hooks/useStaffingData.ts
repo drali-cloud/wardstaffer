@@ -111,6 +111,7 @@ export function useStaffingData() {
         const wardAssignments: string[] = [];
         
         const getEligible = (gender?: Gender) => doctors.filter(d => 
+            d.id !== 'root' &&
             !assignedDoctorIds.has(d.id) && 
             (!gender || d.gender === gender)
         );
@@ -427,8 +428,9 @@ export function useStaffingData() {
         ];
 
         // Track cumulative hours per doctor for the period, starting with ward shifts
+        // Root is excluded from all scheduling — it is a system admin account only
         const hoursMap: Record<string, number> = {};
-        data.doctors.forEach(d => {
+        data.doctors.filter(d => d.id !== 'root').forEach(d => {
             hoursMap[d.id] = calculateTotalHours(d.id, period, wardShifts);
         });
 
