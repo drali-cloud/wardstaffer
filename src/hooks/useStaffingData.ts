@@ -515,8 +515,11 @@ export function useStaffingData() {
         });
 
         const ER_CALL_HARD_CAP = 11;
+        const deactivatedDays = config.deactivatedDays?.[period] || [];
 
         for (let day = 1; day <= daysInMonth; day++) {
+            if (deactivatedDays.includes(day)) continue;
+            
             categories.forEach(cat => {
                 const pool = new Set<string>();
                 cat.wards.forEach(wId => {

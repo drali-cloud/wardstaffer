@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-    Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CircleCheck, Scale, History, RotateCcw, TriangleAlert, CircleX, Filter, Zap, Settings, Database, UploadCloud, AlertOctagon, ArrowRightLeft, UsersRound, Palette
+    Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CircleCheck, Scale, History, RotateCcw, TriangleAlert, CircleX, Filter, Zap, Settings, Database, UploadCloud, AlertOctagon, ArrowRightLeft, UsersRound, Palette, Power, PowerOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
@@ -345,9 +345,27 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
     const daysInMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
     const firstDayIdx = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1).getDay();
 
-    const erShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'));
+    const deactivatedDays = staffing.erConfig.deactivatedDays?.[period] || [];
+
+    const toggleDayActivation = (day: number) => {
+        if (!isAdmin) return;
+        const currentDeactivated = staffing.erConfig.deactivatedDays?.[period] || [];
+        const newDeactivated = currentDeactivated.includes(day)
+            ? currentDeactivated.filter((d: number) => d !== day)
+            : [...currentDeactivated, day];
+        
+        const newConfig = {
+            ...staffing.erConfig,
+            deactivatedDays: {
+                ...(staffing.erConfig.deactivatedDays || {}),
+                [period]: newDeactivated
+            }
+        };
+        staffing.updateERConfig(newConfig);
+    };
 
     const handleDropOnDay = async (day: number) => {
+        if (deactivatedDays.includes(day)) return;
         if (!draggedShift || !isAdmin || draggedShift.day === day) return;
         // Simple case: swap with someone in the SAME slot on another day
         const targetShift = erShifts.find(s => s.day === day && s.wardId === draggedShift.wardId && s.slotIndex === draggedShift.slotIndex);
@@ -385,7 +403,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                     <div className="flex items-center justify-between md:justify-end gap-2">
                         <div className="flex gap-1"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div>
                         {isAdmin && (
-                            <button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex-1 md:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-3.5 h-3.5" /> Calculate</button>
+                            <button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex-1 md:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-3.5 h-3.5" /> Calculate Rotation</button>
                         )}
                     </div>
                 </div>
@@ -394,7 +412,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
             {isAdmin && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                        <h3 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest mb-3 flex items-center gap-2"><Hospital className="w-3.5 h-3.5 text-blue-600" /> Source Wards</h3>
+                        <h3 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest mb-3 flex items-center gap-2"><Hospital className="w-3.5 h-3.5 text-blue-600" /> Source Units</h3>
                         <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-1">
                             {staffing.wards.map((w: Ward) => (
                                 <div key={w.id} draggable={isAdmin} onDragStart={() => setDragSourceWard(w.id)} className={`px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[9px] font-bold text-slate-600 ${isAdmin ? 'cursor-grab active:cursor-grabbing hover:border-blue-400' : ''} transition-all`}>{w.name}</div>
@@ -422,24 +440,43 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                 {Array.from({ length: firstDayIdx }).map((_, i) => <div key={`e-${i}`} className="bg-slate-50/50 min-h-[90px]" />)}
                 {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
+                    const isDeactivated = deactivatedDays.includes(day);
                     const dayShifts = erShifts.filter((s: ShiftRecord) => s.day === day);
                     return (
                         <div key={day}
-                            onClick={() => setSelectedDay(day)}
                             onDragOver={e => isAdmin && e.preventDefault()}
                             onDrop={() => isAdmin && handleDropOnDay(day)}
-                            className="bg-white p-2 min-h-[90px] cursor-pointer hover:bg-amber-50 transition-all border-b border-r border-slate-100 group relative">
-                            <span className="text-xs font-bold text-slate-400">{day}</span>
-                            {dayShifts.length > 0 && (
-                                <div className="mt-2 space-y-1">
-                                    <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase">{dayShifts.length} Active Slots</span></div>
-                                    <div className="flex gap-0.5">{dayShifts.map(s => <div key={s.id} className={`w-1 h-2 rounded-full ${s.wardId === 'er-pediatric' ? 'bg-green-400' : s.wardId === 'er-women' ? 'bg-pink-400' : s.wardId === 'referral' ? 'bg-indigo-400' : 'bg-blue-400'}`} />)}</div>
-                                </div>
-                            )}
+                            className={`bg-white p-2 min-h-[90px] transition-all border-b border-r border-slate-100 group relative ${isDeactivated ? 'bg-slate-50 opacity-60' : 'hover:bg-amber-50'}`}>
+                            <div className="flex justify-between items-start">
+                                <span className={`text-xs font-bold ${isDeactivated ? 'text-slate-300' : 'text-slate-400'}`}>{day}</span>
+                                {isAdmin && (
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); toggleDayActivation(day); }}
+                                        title={isDeactivated ? "Activate Day" : "Deactivate Day"}
+                                        className={`p-1 rounded-md transition-colors ${isDeactivated ? 'text-red-500 hover:bg-red-50' : 'text-slate-200 hover:text-green-500 hover:bg-green-50'}`}
+                                    >
+                                        {isDeactivated ? <PowerOff className="w-3 h-3" /> : <Power className="w-3 h-3" />}
+                                    </button>
+                                )}
+                            </div>
+                            <div className="mt-2 space-y-1 cursor-pointer" onClick={() => !isDeactivated && setSelectedDay(day)}>
+                                {dayShifts.length > 0 && !isDeactivated && (
+                                    <>
+                                        <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase">{dayShifts.length} Active Slots</span></div>
+                                        <div className="flex gap-0.5">{dayShifts.map(s => <div key={s.id} className={`w-1 h-2 rounded-full ${s.wardId === 'er-pediatric' ? 'bg-green-400' : s.wardId === 'er-women' ? 'bg-pink-400' : s.wardId === 'referral' ? 'bg-indigo-400' : 'bg-blue-400'}`} />)}</div>
+                                    </>
+                                )}
+                                {isDeactivated && (
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                        <span className="text-[8px] font-black text-slate-200 uppercase tracking-tighter rotate-12">Inactive</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     );
                 })}
             </div>
+
 
             <AnimatePresence>
                 {selectedDay && (
