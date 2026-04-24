@@ -32,6 +32,16 @@ async function ensureTables() {
       "doctorIds" TEXT NOT NULL
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS shifts (
+      id TEXT PRIMARY KEY,
+      period TEXT NOT NULL,
+      day INTEGER NOT NULL,
+      "wardId" TEXT NOT NULL,
+      "doctorId" TEXT NOT NULL,
+      "slotIndex" INTEGER NOT NULL
+    )
+  `);
 }
 
 // Ensure tables exist on every cold start
@@ -143,12 +153,84 @@ app.post('/api/assignments', async (req, res) => {
   }
 });
 
+// --- Shifts ---
+app.get('/api/shifts', async (req, res) => {
+  try {
+    await getTablesReady();
+    const { rows } = await pool.query('SELECT * FROM shifts');
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/shifts', async (req, res) => {
+  try {
+    await getTablesReady();
+    const shifts = Array.isArray(req.body) ? req.body : [req.body];
+    for (const s of shifts) {
+      await pool.query(
+        `INSERT INTO shifts (id, period, day, "wardId", "doctorId", "slotIndex")
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (id) DO UPDATE SET
+           period = EXCLUDED.period,
+           day = EXCLUDED.day,
+           "wardId" = EXCLUDED."wardId",
+           "doctorId" = EXCLUDED."doctorId",
+           "slotIndex" = EXCLUDED."slotIndex"`,
+        [s.id, s.period, s.day, s.wardId, s.doctorId, s.slotIndex]
+      );
+    }
+    res.status(201).json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/shifts', async (req, res) => {
+  try {
+    await getTablesReady();
+    const { period, type, day, wardId } = req.body;
+    let query = 'DELETE FROM shifts WHERE period = $1';
+    let params = [period];
+    
+    if (type === 'er') {
+      query += " AND (\"wardId\" LIKE 'er-%' OR \"wardId\" = 'referral')";
+    } else if (type === 'ward') {
+      query += " AND \"wardId\" NOT LIKE 'er-%' AND \"wardId\" != 'referral'";
+    } else if (day && wardId) {
+      query += ' AND day = $2 AND "wardId" = $3';
+      params.push(day, wardId);
+    }
+
+    await pool.query(query, params);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.delete('/api/assignments', async (req, res) => {
   try {
     await getTablesReady();
     await pool.query('DELETE FROM assignments');
     res.json({ success: true });
   } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Clear Doctors & Wards ---
+app.delete('/api/clear-database', async (req, res) => {
+  try {
+    await getTablesReady();
+    await pool.query('BEGIN');
+    await pool.query('DELETE FROM doctors');
+    await pool.query('DELETE FROM wards');
+    await pool.query('COMMIT');
+    res.json({ success: true });
+  } catch (e: any) {
+    await pool.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: e.message });
   }
 });

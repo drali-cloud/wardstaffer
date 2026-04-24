@@ -463,6 +463,28 @@ app.post('/api/import', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// --- Teams ---
+app.get('/api/teams', async (req, res) => {
+    await getTablesReady();
+    if (isUsingMock) return res.json([]);
+    try {
+        const sql = getSql();
+        const rows = await sql('SELECT value FROM settings WHERE key = $1', ['teams']);
+        res.json(rows[0]?.value ? JSON.parse(rows[0].value) : []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/teams', async (req, res) => {
+    await getTablesReady();
+    if (isUsingMock) return res.json({ success: true });
+    try {
+        const sql = getSql();
+        const teams = req.body;
+        await sql('INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', ['teams', JSON.stringify(teams)]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // --- Debug ---
 app.get('/api/debug-db', async (req, res) => {
   try {
