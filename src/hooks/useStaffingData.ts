@@ -482,9 +482,20 @@ export function useStaffingData() {
         // Track cumulative hours per doctor for the period, starting with ward shifts
         // Root is excluded from all scheduling — it is a system admin account only
         const hoursMap: Record<string, number> = {};
+        // Separate counters for referral and ER (non-referral) calls — used as primary sort keys
+        // so that a 24h referral block does NOT crowd a doctor out of the ER rotation.
+        const erCallCount: Record<string, number> = {};    // non-referral ER slots only
+        const referralCount: Record<string, number> = {};  // referral slots only
         data.doctors.filter(d => d.id !== 'root').forEach(d => {
-            hoursMap[d.id] = calculateTotalHours(d.id, period, wardShifts);
+            hoursMap[d.id]      = calculateTotalHours(d.id, period, wardShifts);
+            erCallCount[d.id]   = 0;
+            referralCount[d.id] = 0;
         });
+
+        // Target: 6–10 ER calls per doctor. Hard ceiling prevents extreme overload.
+        const ER_CALL_SOFT_MIN = 6;
+        const ER_CALL_SOFT_MAX = 10;
+        const ER_CALL_HARD_CAP = 11; // allow +1 overflow only if no other candidate exists
 
         for (let day = 1; day <= daysInMonth; day++) {
             categories.forEach(cat => {
@@ -530,11 +541,23 @@ export function useStaffingData() {
                             return false;
                         };
 
-                        // Pass 1: Strict (ward 12h rest + ER cross-day 12h rest + referral buffer)
+                        // Sort helper: for ER slots use erCallCount (not total hours) so referral's
+                        // 24h weight does NOT push doctors out of the ER rotation.
+                        // For referral slots use referralCount so the duty spreads across more males.
+                        const sortKey = (id: string) =>
+                            cat.id === 'referral' ? referralCount[id] ?? 0 : erCallCount[id] ?? 0;
+
+                        // Hard-cap filter: skip doctors at/above the hard cap for non-referral ER slots
+                        // unless there is absolutely no other choice (handled in Pass 3).
+                        const underHardCap = (id: string) =>
+                            cat.id === 'referral' || (erCallCount[id] ?? 0) < ER_CALL_HARD_CAP;
+
+                        // Pass 1: Strict (ward 12h rest + ER cross-day 12h rest + referral buffer + hard cap)
                         let eligible = poolArray
                             .filter(candidate => {
                                 const doc = doctorMap.get(candidate);
                                 if (cat.maleOnly && doc?.gender !== 'Male') return false;
+                                if (!underHardCap(candidate)) return false;
 
                                 const hasWardShiftToday     = wardShifts.some(x => x.day === day     && x.doctorId === candidate);
                                 const hasWardShiftYesterday = wardShifts.some(x => x.day === day - 1 && x.doctorId === candidate);
@@ -551,7 +574,7 @@ export function useStaffingData() {
 
                                 return !hasWardShiftToday && !yesterdayWardConflict && !tomorrowWardConflict && !hasOtherERToday && !erCrossConflict && !refBufferConflict;
                             })
-                            .sort((a, b) => hoursMap[a] - hoursMap[b]);
+                            .sort((a, b) => sortKey(a) - sortKey(b));
 
                         // Pass 2: Relaxed — keep ER cross-day rule but drop ward-rest rules
                         if (eligible.length === 0) {
@@ -559,6 +582,7 @@ export function useStaffingData() {
                                 .filter(candidate => {
                                     const doc = doctorMap.get(candidate);
                                     if (cat.maleOnly && doc?.gender !== 'Male') return false;
+                                    if (!underHardCap(candidate)) return false;
 
                                     const hasWardShiftToday = wardShifts.some(x => x.day === day && x.doctorId === candidate);
                                     const hasOtherERToday   = newERShifts.some(x => x.day === day && x.doctorId === candidate);
@@ -567,10 +591,10 @@ export function useStaffingData() {
 
                                     return !hasWardShiftToday && !hasOtherERToday && !erCrossConflict && !refBufferConflict;
                                 })
-                                .sort((a, b) => hoursMap[a] - hoursMap[b]);
+                                .sort((a, b) => sortKey(a) - sortKey(b));
                         }
 
-                        // Pass 3: Last-resort — only same-day and referral buffer blocked
+                        // Pass 3: Last-resort — drop hard cap too; only same-day and referral buffer blocked
                         if (eligible.length === 0) {
                             eligible = poolArray
                                 .filter(candidate => {
@@ -580,7 +604,7 @@ export function useStaffingData() {
                                     const refBufferConflict = hasReferralBufferConflict(candidate);
                                     return !sameDay && !refBufferConflict;
                                 })
-                                .sort((a, b) => hoursMap[a] - hoursMap[b]);
+                                .sort((a, b) => sortKey(a) - sortKey(b));
                         }
 
                         if (eligible.length > 0) {
@@ -590,6 +614,12 @@ export function useStaffingData() {
                                 period, day, wardId: cat.id, doctorId: dId, slotIndex: slotIdx
                             });
                             hoursMap[dId] += cat.duration;
+                            // Update per-type counters
+                            if (cat.id === 'referral') {
+                                referralCount[dId] = (referralCount[dId] ?? 0) + 1;
+                            } else {
+                                erCallCount[dId] = (erCallCount[dId] ?? 0) + 1;
+                            }
                         }
                     }
                 });
@@ -749,12 +779,12 @@ export function useStaffingData() {
         //   3. Apply the single move that achieves the GREATEST gap reduction.
         //   4. Repeat until no move improves equity or threshold is reached.
         //
-        // Key improvements over old algorithm:
-        //   - Scans ALL pairs, not just top-5 / bottom-5.
-        //   - Picks BEST move per iteration, not first valid move.
-        //   - Prevents overshoot (poor becoming richer than rich after move).
-        //   - Uses configurable fatigueGap and balanceThreshold.
-        //   - Tries all swap directions, not just referral↔small.
+        // ER soft cap (10 calls) prevents loading a doctor with 12-13 ER calls
+        // when redistributing. Referral moves are exempt from this cap.
+
+        const ER_BALANCE_SOFT_MAX = 10;
+        const countERCalls = (docId: string, shifts: ShiftRecord[]) =>
+            shifts.filter(s => s.period === period && s.doctorId === docId && s.wardId.startsWith('er-')).length;
 
         let iterations = 0;
         let improved = true;
@@ -771,6 +801,7 @@ export function useStaffingData() {
                         id: d.id,
                         gender: d.gender as string,
                         hours: calculateTotalHours(d.id, period, currentShifts),
+                        erCalls: countERCalls(d.id, currentShifts),
                         isExcluded: !!(asgn && excludedWardIds.includes(asgn.wardId))
                     };
                 })
@@ -820,6 +851,8 @@ export function useStaffingData() {
                     for (const s of richERSorted) {
                         if (s.wardId === 'referral' && poor.gender !== 'Male') continue;
                         if (!canTakeShift(poor.id, s, currentShifts)) continue;
+                        // Don't push poor above soft ER cap (referral is exempt — it helps hours equity)
+                        if (s.wardId !== 'referral' && poor.erCalls >= ER_BALANCE_SOFT_MAX) continue;
 
                         const dur = getDuration(s);
                         const newRich = rich.hours - dur;
@@ -845,6 +878,8 @@ export function useStaffingData() {
 
                             if (richShift.wardId === 'referral' && poor.gender !== 'Male') continue;
                             if (poorShift.wardId === 'referral' && rich.gender !== 'Male') continue;
+                            // Swapping non-referral ER shift onto poor who's already at soft cap
+                            if (richShift.wardId !== 'referral' && poor.erCalls >= ER_BALANCE_SOFT_MAX) continue;
 
                             const tempShifts = currentShifts.filter(s => s.id !== richShift.id && s.id !== poorShift.id);
                             if (!canTakeShift(poor.id, richShift, tempShifts)) continue;
