@@ -296,7 +296,19 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                     const referralShift = dayShifts.find(s => s.wardId === 'referral');
 
                     return (
-                        <div key={day} onClick={() => setSelectedDay(day)} className={`bg-white p-2 min-h-[90px] cursor-pointer hover:bg-blue-50 transition-all border-b border-r border-slate-100 group relative ${selectedDay === day ? 'ring-2 ring-blue-500 z-10' : ''}`}>
+                        <div key={day} 
+                            onClick={() => setSelectedDay(day)} 
+                            onDragOver={e => isAdmin && e.preventDefault()}
+                            onDrop={() => {
+                                if (draggedTeamId && isAdmin) {
+                                    // Massive assignment: Assign team to ALL active wards for this day
+                                    staffing.wards.filter((w: Ward) => !w.hiddenFromCalendar && !w.parentWardId).forEach((w: Ward) => {
+                                        staffing.assignTeamToWardDay(period, day, w.id, draggedTeamId);
+                                    });
+                                    setDraggedTeamId(null);
+                                }
+                            }}
+                            className={`bg-white p-2 min-h-[90px] cursor-pointer hover:bg-blue-50 transition-all border-b border-r border-slate-100 group relative ${selectedDay === day ? 'ring-2 ring-blue-500 z-10' : ''} ${draggedTeamId && isAdmin ? 'ring-2 ring-dashed ring-indigo-400 bg-indigo-50/20' : ''}`}>
                             <span className={`text-xs font-bold ${day === new Date().getDate() && viewDate.getMonth() === new Date().getMonth() ? 'w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center' : 'text-slate-700'}`}>{day}</span>
                             {dayShiftsCount > 0 && (
                                 <div className="mt-2 space-y-1">
@@ -522,7 +534,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                         <div key={day}
                             onDragOver={e => isAdmin && e.preventDefault()}
                             onDrop={() => isAdmin && handleDropOnDay(day)}
-                            className={`bg-white p-2 min-h-[90px] transition-all border-b border-r border-slate-100 group relative ${isDeactivated ? 'bg-slate-50 opacity-60' : 'hover:bg-amber-50'}`}>
+                            className={`bg-white p-2 min-h-[90px] transition-all border-b border-r border-slate-100 group relative ${isDeactivated ? 'bg-slate-50 opacity-60' : 'hover:bg-amber-50'} ${draggedTeamId && isAdmin && !isDeactivated ? 'ring-2 ring-dashed ring-indigo-400 bg-indigo-50/20' : ''}`}>
                             <div className="flex justify-between items-start">
                                 <span className={`text-xs font-bold ${isDeactivated ? 'text-slate-300' : 'text-slate-400'}`}>{day}</span>
                                 {isAdmin && (
