@@ -293,16 +293,18 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                     const day = i + 1;
                     const dayShifts = periodShifts.filter((s: ShiftRecord) => s.day === day);
                     const erDayShifts = dayShifts.filter(s => s.wardId.startsWith('er-') || s.wardId === 'referral');
-                    const dayShiftsCount = dayShifts.filter(s => !s.wardId.startsWith('er-') && s.wardId !== 'referral').length;
+                    const wardDayShifts = dayShifts.filter(s => !s.wardId.startsWith('er-') && s.wardId !== 'referral');
+                    const dayShiftsCount = wardDayShifts.length;
                     const referralShift = dayShifts.find(s => s.wardId === 'referral');
                     const erTeam = erDayShifts.length > 0 ? staffing.teams.find((t: Team) => t.memberIds.includes(erDayShifts[0].doctorId)) : null;
+                    const wardTeam = wardDayShifts.length > 0 ? staffing.teams.find((t: Team) => t.memberIds.includes(wardDayShifts[0].doctorId)) : null;
                     const teamColorMap: Record<string, string> = {
-                        violet: 'bg-violet-100 text-violet-700 border-violet-200',
-                        emerald: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-                        rose: 'bg-rose-100 text-rose-700 border-rose-200',
-                        amber: 'bg-amber-100 text-amber-700 border-amber-200',
-                        cyan: 'bg-cyan-100 text-cyan-700 border-cyan-200',
-                        orange: 'bg-orange-100 text-orange-700 border-orange-200'
+                        violet: 'bg-violet-600 text-white border-violet-700 shadow-md shadow-violet-600/20',
+                        emerald: 'bg-emerald-600 text-white border-emerald-700 shadow-md shadow-emerald-600/20',
+                        rose: 'bg-rose-600 text-white border-rose-700 shadow-md shadow-rose-600/20',
+                        amber: 'bg-amber-500 text-white border-amber-600 shadow-md shadow-amber-500/20',
+                        cyan: 'bg-cyan-500 text-white border-cyan-600 shadow-md shadow-cyan-500/20',
+                        orange: 'bg-orange-500 text-white border-orange-600 shadow-md shadow-orange-500/20'
                     };
 
                     return (
@@ -317,14 +319,19 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                                 }
                             }}
                             className={`bg-white p-2 min-h-[90px] cursor-pointer hover:bg-blue-50 transition-all border-b border-r border-slate-100 group relative ${selectedDay === day ? 'ring-2 ring-blue-500 z-10' : ''} ${draggedTeamId && isAdmin ? 'ring-2 ring-dashed ring-indigo-400 bg-indigo-50/20' : ''}`}>
-                            <div className="flex justify-between items-start mb-1">
-                                <span className={`text-xs font-bold ${day === new Date().getDate() && viewDate.getMonth() === new Date().getMonth() ? 'w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center' : 'text-slate-700'}`}>{day}</span>
+                            <div className="flex flex-col gap-1 absolute top-1 right-1 items-end z-10">
                                 {erTeam && (
-                                    <div className={`px-1.5 py-0.5 rounded-[4px] border text-[7px] font-black uppercase tracking-tighter ${teamColorMap[erTeam.color] || 'bg-slate-100 text-slate-600'}`}>
-                                        {erTeam.name}
+                                    <div className={`px-2 py-0.5 rounded-md border text-[8px] md:text-[9px] font-black uppercase tracking-wider ${teamColorMap[erTeam.color] || 'bg-slate-600 text-white'} flex items-center gap-1 scale-90 origin-right`}>
+                                        <Activity className="w-2.5 h-2.5" /> ER {erTeam.name.replace('Team ', '')}
+                                    </div>
+                                )}
+                                {wardTeam && (
+                                    <div className={`px-2 py-0.5 rounded-md border text-[8px] md:text-[9px] font-black uppercase tracking-wider ${teamColorMap[wardTeam.color] || 'bg-slate-600 text-white'} flex items-center gap-1 scale-90 origin-right`}>
+                                        <Hospital className="w-2.5 h-2.5" /> WD {wardTeam.name.replace('Team ', '')}
                                     </div>
                                 )}
                             </div>
+                            <span className={`text-xs font-bold ${day === new Date().getDate() && viewDate.getMonth() === new Date().getMonth() ? 'w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center' : 'text-slate-700'}`}>{day}</span>
                             {dayShiftsCount > 0 && (
                                 <div className="mt-2 space-y-1">
                                     <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">{dayShiftsCount} Slots</span></div>
