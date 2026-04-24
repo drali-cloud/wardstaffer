@@ -450,10 +450,23 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                                 <button onClick={() => setSelectedDay(null)} className="p-2 hover:bg-white/10 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
                             </div>
                             <div className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 overflow-y-auto flex-grow bg-slate-50/50">
-                                <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
-                                <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
-                                <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
-                                <ERModalColumn title="Daily Referral" wardId="referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={['24-Hour Duty Rotation']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
+                                {/* ER category columns use labels from erConfig if set */}
+                                {(() => {
+                                    const cfg = staffing.erConfig;
+                                    const defLabels = {
+                                        men: ['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00'],
+                                        women: ['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00'],
+                                        pediatric: ['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00'],
+                                        referral: ['24-Hour Duty Rotation']
+                                    };
+                                    const lbls = cfg?.slotLabels || defLabels;
+                                    return (<>
+                                        <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={lbls.men || defLabels.men} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} />
+                                        <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={lbls.women || defLabels.women} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} />
+                                        <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={lbls.pediatric || defLabels.pediatric} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} />
+                                        <ERModalColumn title="Daily Referral" wardId="referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={lbls.referral || defLabels.referral} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} />
+                                    </>);
+                                })()}
                             </div>
                             <div className="p-5 md:p-6 bg-white border-t border-slate-100 flex-shrink-0"><button onClick={() => setSelectedDay(null)} className="w-full bg-blue-600 text-white py-3 rounded-2xl font-bold shadow-lg shadow-blue-600/20 active:scale-95 transition-all text-sm uppercase tracking-widest">Finish Review</button></div>
                         </div>
@@ -464,22 +477,29 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
     );
 });
 
-function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onNavigate, onClose, onDragShift, draggedShift }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green' | 'indigo', slots: string[], onNavigate: (id: string) => void, onClose: () => void, onDragShift: (s: ShiftRecord | null) => void, draggedShift: ShiftRecord | null }) {
+function ERModalColumn({ title, wardId, day, period, staffing, color, slots, erConfig, onNavigate, onClose, onDragShift, draggedShift }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green' | 'indigo', slots: string[], erConfig: any, onNavigate: (id: string) => void, onClose: () => void, onDragShift: (s: ShiftRecord | null) => void, draggedShift: ShiftRecord | null }) {
     const dayShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.day === day && s.wardId === wardId);
     const colors: any = { blue: 'text-blue-600 bg-blue-50 border-blue-100', pink: 'text-pink-600 bg-pink-50 border-pink-100', green: 'text-green-600 bg-green-50 border-green-100', indigo: 'text-indigo-600 bg-indigo-50 border-indigo-100' };
+
+    // Derive slot capacity from erConfig, falling back to hardcoded defaults
+    const defaultSlots = { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+    const configSlots = erConfig?.slots || defaultSlots;
+    const catKey = wardId === 'referral' ? 'referral' : wardId.replace('er-', '') as keyof typeof defaultSlots;
+    const slotCapacities: number[] = configSlots[catKey] || defaultSlots[catKey] || [1];
+
     return (
         <div className="space-y-4">
             <h4 className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full w-fit ${colors[color]}`}>{title} Department</h4>
             <div className="space-y-3">
                 {slots.map((time, idx) => {
                     const slotShifts = dayShifts.filter(s => s.slotIndex === idx);
-                    const isHighDensity = (idx === 1 || idx === 2) && (wardId === 'er-men' || wardId === 'er-women');
+                    const slotCount = slotCapacities[idx] ?? 1;
                     return (
                         <div key={idx}
                             onDragOver={e => e.preventDefault()}
                             onDrop={async () => {
                                 if (!draggedShift) return;
-                                const targetShift = slotShifts[0]; // For simplicity, pick first in slot
+                                const targetShift = slotShifts[0];
                                 if (targetShift && targetShift.id !== draggedShift.id) {
                                     await staffing.swapERCalls(period, draggedShift, targetShift);
                                     onDragShift(null);
@@ -491,23 +511,10 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
                                 <span className="text-blue-600">{getSlotName(idx, wardId)}</span>
                             </p>
                             <div className="space-y-2">
-                                {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 1 : (wardId === 'referral' ? 1 : 2)) }).map((_, sIdx) => {
+                                {Array.from({ length: slotCount }).map((_, sIdx) => {
                                     const shift = slotShifts[sIdx];
-                                    let badgeColor = 'bg-slate-50 text-slate-400';
-                                    let roleLabel = '';
-
-                                    if (isHighDensity) {
-                                        if (sIdx < 2) {
-                                            badgeColor = 'bg-yellow-50 text-yellow-700 border-yellow-100';
-                                            roleLabel = 'Accidents & Surgery';
-                                        } else {
-                                            badgeColor = 'bg-green-50 text-green-700 border-green-100';
-                                            roleLabel = 'Medical Emergencies';
-                                        }
-                                    } else {
-                                        badgeColor = shift ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-slate-50 text-slate-400';
-                                        roleLabel = wardId === 'referral' ? 'External Referral' : 'General ER';
-                                    }
+                                    const badgeColor = shift ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-slate-50 text-slate-400';
+                                    const roleLabel = wardId === 'referral' ? 'External Referral' : 'General ER';
 
                                     return (
                                         <div key={sIdx}
@@ -516,7 +523,7 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
                                             className={`flex flex-col p-1.5 rounded-lg border ${badgeColor} ${shift ? 'cursor-grab active:cursor-grabbing hover:bg-slate-100 transition-colors' : ''}`}
                                             onClick={() => { if (shift) { onNavigate(shift.doctorId); onClose(); } }}>
                                             <div className="flex justify-between items-center mb-1">
-                                                <span className="text-[7px] uppercase font-black tracking-tighter opacity-70">{roleLabel}</span>
+                                                <span className="text-[7px] uppercase font-black tracking-tighter opacity-70">{roleLabel} #{sIdx + 1}</span>
                                             </div>
                                             <span className="text-[9px] font-bold truncate">{shift ? staffing.doctorMap.get(shift.doctorId)?.name : 'Unassigned'}</span>
                                         </div>
@@ -1655,13 +1662,48 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
     const docShifts = staffing.shifts.filter((s: any) => s.doctorId === selectedDocId && s.period === microPeriod);
 
     const defaultSlots = { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+    const defaultLabels = {
+        men: ['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00'],
+        women: ['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00'],
+        pediatric: ['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00'],
+        referral: ['24-Hour Duty Rotation']
+    };
+    const defaultDurations = { referral: 24, men: 6, women: 6, pediatric: 8 };
     const currentSlots = staffing.erConfig?.slots || defaultSlots;
+    const currentLabels = staffing.erConfig?.slotLabels || defaultLabels;
+    const currentDurations = staffing.erConfig?.durations || defaultDurations;
+    const fatigueGap = staffing.erConfig?.fatigueGap ?? 12;
+    const balanceThreshold = staffing.erConfig?.balanceThreshold ?? 12;
+    const referralMaleOnly = staffing.erConfig?.referralMaleOnly !== false;
 
     const handleUpdateSlots = (category: 'referral' | 'men' | 'women' | 'pediatric', slotIdx: number, val: number) => {
         if (val < 0) return;
         const newSlots = { ...currentSlots, [category]: [...currentSlots[category]] };
         newSlots[category][slotIdx] = val;
         staffing.updateERConfig({ ...staffing.erConfig, slots: newSlots });
+    };
+
+    const handleUpdateLabel = (category: 'referral' | 'men' | 'women' | 'pediatric', slotIdx: number, val: string) => {
+        const newLabels = { ...currentLabels, [category]: [...(currentLabels[category] || [])] };
+        newLabels[category][slotIdx] = val;
+        staffing.updateERConfig({ ...staffing.erConfig, slotLabels: newLabels });
+    };
+
+    const handleAddSlot = (category: 'men' | 'women' | 'pediatric') => {
+        const newSlots = { ...currentSlots, [category]: [...currentSlots[category], 1] };
+        const newLabels = { ...currentLabels, [category]: [...(currentLabels[category] || []), 'New Slot'] };
+        staffing.updateERConfig({ ...staffing.erConfig, slots: newSlots, slotLabels: newLabels });
+    };
+
+    const handleRemoveSlot = (category: 'men' | 'women' | 'pediatric') => {
+        if (currentSlots[category].length <= 1) return;
+        const newSlots = { ...currentSlots, [category]: currentSlots[category].slice(0, -1) };
+        const newLabels = { ...currentLabels, [category]: (currentLabels[category] || []).slice(0, -1) };
+        staffing.updateERConfig({ ...staffing.erConfig, slots: newSlots, slotLabels: newLabels });
+    };
+
+    const handleUpdateDuration = (category: 'referral' | 'men' | 'women' | 'pediatric', val: number) => {
+        staffing.updateERConfig({ ...staffing.erConfig, durations: { ...currentDurations, [category]: val } });
     };
 
     const handleExport = () => {
@@ -1792,47 +1834,81 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
             {/* ER Capacity Configuration */}
             <div className="bg-white p-8 rounded-3xl border border-amber-100 shadow-sm relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-amber-50 rounded-bl-full -z-10" />
-                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-6">
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-2">
                     <Activity className="w-5 h-5 text-amber-500" /> ER Capacity Configuration
                 </h3>
-                <p className="text-sm text-slate-500 mb-6">Adjust the number of clinicians required for each specific ER shift and Referral Call.</p>
+                <p className="text-sm text-slate-500 mb-6">Configure every aspect of ER scheduling — slot counts, time windows, hour weights, fatigue gaps, and referral rules.</p>
+
+                {/* Global ER Settings */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 p-4 bg-amber-50/40 rounded-2xl border border-amber-100">
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fatigue Safety Gap (hours)</label>
+                        <p className="text-[9px] text-slate-400">Min rest between ER shifts across days</p>
+                        <input type="number" min="0" max="24" value={fatigueGap}
+                            onChange={e => staffing.updateERConfig({ ...staffing.erConfig, fatigueGap: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-bold text-center" />
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Equity Balance Threshold (hours)</label>
+                        <p className="text-[9px] text-slate-400">Max allowed hour gap before auto-balance triggers</p>
+                        <input type="number" min="0" value={balanceThreshold}
+                            onChange={e => staffing.updateERConfig({ ...staffing.erConfig, balanceThreshold: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-bold text-center" />
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Referral: Male Doctors Only</label>
+                        <p className="text-[9px] text-slate-400">Restrict daily referral calls to male physicians</p>
+                        <button onClick={() => staffing.updateERConfig({ ...staffing.erConfig, referralMaleOnly: !referralMaleOnly })}
+                            className={`w-full py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-colors border ${
+                                referralMaleOnly ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300'
+                            }`}>
+                            {referralMaleOnly ? '✓ Male Only' : '✗ All Genders'}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Per-category slot grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <div className="space-y-4">
-                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">Referral Call</h4>
-                        {currentSlots.referral.map((val: number, idx: number) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">24-Hour Duty</span>
-                                <input type="number" min="0" value={val} onChange={(e) => handleUpdateSlots('referral', idx, parseInt(e.target.value) || 0)} className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
+                    {(['referral', 'men', 'women', 'pediatric'] as const).map(cat => (
+                        <div key={cat} className="space-y-4">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest">
+                                    {cat === 'referral' ? 'Referral Call' : `ER - ${cat.charAt(0).toUpperCase() + cat.slice(1)}`}
+                                </h4>
+                                {cat !== 'referral' && (
+                                    <div className="flex gap-1">
+                                        <button onClick={() => handleAddSlot(cat)} className="w-5 h-5 rounded bg-green-100 text-green-600 font-bold text-xs hover:bg-green-200 transition-colors">+</button>
+                                        <button onClick={() => handleRemoveSlot(cat)} className="w-5 h-5 rounded bg-red-100 text-red-600 font-bold text-xs hover:bg-red-200 transition-colors">−</button>
+                                    </div>
+                                )}
                             </div>
-                        ))}
-                    </div>
-                    <div className="space-y-4">
-                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">ER - Men</h4>
-                        {currentSlots.men.map((val: number, idx: number) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">Slot {idx + 1}</span>
-                                <input type="number" min="0" value={val} onChange={(e) => handleUpdateSlots('men', idx, parseInt(e.target.value) || 0)} className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
+                            {/* Duration weight */}
+                            <div className="flex items-center justify-between bg-indigo-50 p-2 rounded-lg border border-indigo-100">
+                                <span className="text-[10px] font-bold text-indigo-600 uppercase">Hour Weight (h)</span>
+                                <input type="number" min="0" value={currentDurations[cat] ?? defaultDurations[cat]}
+                                    onChange={e => handleUpdateDuration(cat, parseFloat(e.target.value) || 0)}
+                                    className="w-16 bg-white border border-indigo-200 rounded p-1 text-xs text-center font-bold" />
                             </div>
-                        ))}
-                    </div>
-                    <div className="space-y-4">
-                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">ER - Women</h4>
-                        {currentSlots.women.map((val: number, idx: number) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">Slot {idx + 1}</span>
-                                <input type="number" min="0" value={val} onChange={(e) => handleUpdateSlots('women', idx, parseInt(e.target.value) || 0)} className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
-                            </div>
-                        ))}
-                    </div>
-                    <div className="space-y-4">
-                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">ER - Pediatric</h4>
-                        {currentSlots.pediatric.map((val: number, idx: number) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">Slot {idx + 1}</span>
-                                <input type="number" min="0" value={val} onChange={(e) => handleUpdateSlots('pediatric', idx, parseInt(e.target.value) || 0)} className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
-                            </div>
-                        ))}
-                    </div>
+                            {/* Per-slot rows */}
+                            {currentSlots[cat].map((val: number, idx: number) => (
+                                <div key={idx} className="space-y-1">
+                                    <input
+                                        type="text"
+                                        value={(currentLabels[cat] || [])[idx] || `Slot ${idx + 1}`}
+                                        onChange={e => handleUpdateLabel(cat, idx, e.target.value)}
+                                        placeholder={`Slot ${idx + 1} label`}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded p-1 text-[10px] font-bold text-slate-600"
+                                    />
+                                    <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                        <span className="text-[10px] font-bold text-slate-500 uppercase">Doctors</span>
+                                        <input type="number" min="0" value={val}
+                                            onChange={e => handleUpdateSlots(cat, idx, parseInt(e.target.value) || 0)}
+                                            className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ))}
                 </div>
             </div>
 

@@ -13,7 +13,7 @@ export function useStaffingData() {
   const [data, setData] = useState<StaffingData>({ doctors: [], wards: [], assignments: [], shifts: [], logs: [] });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[] }>({ men: [], women: [], pediatric: [] });
+  const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[], slots?: any, durations?: any, slotLabels?: any, fatigueGap?: number, balanceThreshold?: number, referralMaleOnly?: boolean }>({ men: [], women: [], pediatric: [] });
 
   const allWards = useMemo(() => {
     return [
@@ -185,23 +185,24 @@ export function useStaffingData() {
 
   const calculateTotalHours = useCallback((doctorId: string, period?: string, customShifts?: ShiftRecord[]) => {
     const shiftsToUse = customShifts || data.shifts;
+    const durations = erConfig.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
     return shiftsToUse
         .filter(s => s.doctorId === doctorId && (!period || s.period === period))
         .reduce((total, s) => {
-            if (s.wardId.includes('referral')) return total + 24;
-            if (s.wardId.includes('men') || s.wardId.includes('women')) return total + 6;
-            if (s.wardId.includes('pediatric')) return total + 8;
-            if (s.wardId.startsWith('er-')) return total + 12; 
+            if (s.wardId === 'referral') return total + (durations.referral ?? 24);
+            if (s.wardId === 'er-men') return total + (durations.men ?? 6);
+            if (s.wardId === 'er-women') return total + (durations.women ?? 6);
+            if (s.wardId === 'er-pediatric') return total + (durations.pediatric ?? 8);
+            if (s.wardId.startsWith('er-')) return total + 12;
             
-            // Use ward's actual configured shift duration (ICU/CCU may be 12h, not 24h)
             const ward = data.wards.find(w => w.id === s.wardId);
             if (ward?.requirements?.shiftWeight !== undefined) return total + ward.requirements.shiftWeight;
             const duration = ward?.requirements?.shiftDuration;
             if (duration === '6h') return total + 6;
             if (duration === '12h') return total + 12;
-            return total + 24; // Default to 24h for unlisted or '24h' wards
+            return total + 24;
         }, 0);
-  }, [data.shifts, data.wards]);
+  }, [data.shifts, data.wards, erConfig.durations]);
 
   const calculateDailyRoster = useCallback(async (period: string) => {
       setSyncing(true);
@@ -402,12 +403,15 @@ export function useStaffingData() {
         const newERShifts: ShiftRecord[] = [];
         
         const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+        const durations = config.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
+        const fatigueGap = config.fatigueGap ?? 12;
+        const referralMaleOnly = config.referralMaleOnly !== false; // default true
         
         const categories = [
-            { id: 'referral', name: 'Daily Referral', slots: slots.referral, wards: [...config.men, ...config.women, ...config.pediatric], duration: 24, maleOnly: true },
-            { id: 'er-men', name: 'Men', slots: slots.men, wards: config.men, duration: 6 },
-            { id: 'er-women', name: 'Women', slots: slots.women, wards: config.women, duration: 6 },
-            { id: 'er-pediatric', name: 'Pediatric', slots: slots.pediatric, wards: config.pediatric, duration: 8 }
+            { id: 'referral', name: 'Daily Referral', slots: slots.referral, wards: [...config.men, ...config.women, ...config.pediatric], duration: durations.referral ?? 24, maleOnly: referralMaleOnly },
+            { id: 'er-men', name: 'Men', slots: slots.men, wards: config.men, duration: durations.men ?? 6 },
+            { id: 'er-women', name: 'Women', slots: slots.women, wards: config.women, duration: durations.women ?? 6 },
+            { id: 'er-pediatric', name: 'Pediatric', slots: slots.pediatric, wards: config.pediatric, duration: durations.pediatric ?? 8 }
         ];
 
         // Track cumulative hours per doctor for the period, starting with ward shifts
@@ -442,10 +446,8 @@ export function useStaffingData() {
                                 if (prev.day !== day - 1 || prev.doctorId !== candidate) return false;
                                 const prevEndHour = SLOT_END[prev.slotIndex ?? 0] ?? 24;
                                 const todayStartHour = SLOT_START[slotIdx] ?? 8;
-                                // prevEnd is already relative to yesterday; today's start is +24h from yesterday midnight
-                                // gap = (todayStartHour + 24) - prevEndHour
                                 const gap = (todayStartHour + 24) - prevEndHour;
-                                return gap < 12;
+                                return gap < fatigueGap;
                             });
                         };
 
@@ -658,20 +660,23 @@ export function useStaffingData() {
             if (leaderboard.length < 2) break;
             const maxDoc = leaderboard[0];
             const minDoc = leaderboard[leaderboard.length - 1];
-            if (maxDoc.hours - minDoc.hours <= 12) break;
+            const balanceThreshold = erConfig.balanceThreshold ?? 12;
+            if (maxDoc.hours - minDoc.hours <= balanceThreshold) break;
 
             let bestMove: { type: 'move' | 'swap', shiftId: string, otherShiftId?: string, toDocId: string } | null = null;
 
             const getDuration = (s: ShiftRecord) => {
-                if (s.wardId === 'referral') return 24;
-                if (s.wardId === 'er-men' || s.wardId === 'er-women') return 6;
-                if (s.wardId === 'er-pediatric') return 8;
+                const durations = erConfig.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
+                if (s.wardId === 'referral') return durations.referral ?? 24;
+                if (s.wardId === 'er-men') return durations.men ?? 6;
+                if (s.wardId === 'er-women') return durations.women ?? 6;
+                if (s.wardId === 'er-pediatric') return durations.pediatric ?? 8;
                 return 12;
             };
 
             outer: for (const fromDoc of leaderboard.slice(0, 5)) {
                 for (const toDoc of leaderboard.slice(-5).reverse()) {
-                    if (fromDoc.hours - toDoc.hours <= 12) continue;
+                    if (fromDoc.hours - toDoc.hours <= balanceThreshold) continue;
 
                     const fromER = currentShifts.filter(s => s.period === period && s.doctorId === fromDoc.id && s.wardId.startsWith('er-'));
                     const toER = currentShifts.filter(s => s.period === period && s.doctorId === toDoc.id && s.wardId.startsWith('er-'));
