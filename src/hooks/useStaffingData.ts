@@ -876,6 +876,48 @@ export function useStaffingData() {
     } catch (e: any) { alert(`Ward assignment failed: ${e.message}`); } finally { setSyncing(false); }
   }, [teams, data.wards]);
 
+  const assignTeamToWardsBulk = useCallback(async (period: string, day: number, wardIds: string[], teamId: string) => {
+    setSyncing(true);
+    try {
+        const team = teams.find(t => t.id === teamId);
+        if (!team || team.memberIds.length === 0) return;
+
+        const allNewShifts: ShiftRecord[] = [];
+        for (const wardId of wardIds) {
+            const ward = data.wards.find(w => w.id === wardId);
+            if (!ward) continue;
+
+            const { staffPerShift, shiftDuration } = ward.requirements;
+            const shiftsPerDay = shiftDuration === '6h' ? 4 : shiftDuration === '12h' ? 2 : 1;
+            
+            for (let sIdx = 0; sIdx < shiftsPerDay; sIdx++) {
+                for (let p = 0; p < staffPerShift; p++) {
+                    const dId = team.memberIds[(sIdx * staffPerShift + p) % team.memberIds.length];
+                    allNewShifts.push({
+                        id: `ward-bulk-${period}-${day}-${ward.id}-${sIdx}-${p}`,
+                        period, day, wardId, doctorId: dId, slotIndex: sIdx
+                    });
+                }
+            }
+        }
+
+        const resp = await fetch('/api/shifts', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(allNewShifts) 
+        });
+        if (!resp.ok) throw new Error('Failed to save bulk assignment');
+
+        setData(prev => ({ 
+            ...prev, 
+            shifts: [
+                ...prev.shifts.filter(s => !(s.period === period && s.day === day && wardIds.includes(s.wardId))), 
+                ...allNewShifts
+            ] 
+        }));
+    } catch (e: any) { alert(`Bulk assignment failed: ${e.message}`); } finally { setSyncing(false); }
+  }, [teams, data.wards]);
+
   const assignTeamToERCategory = useCallback(async (period: string, day: number, wardId: string, teamId: string) => {
     setSyncing(true);
     try {

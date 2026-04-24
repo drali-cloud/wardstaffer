@@ -301,10 +301,8 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                             onDragOver={e => isAdmin && e.preventDefault()}
                             onDrop={() => {
                                 if (draggedTeamId && isAdmin) {
-                                    // Massive assignment: Assign team to ALL active wards for this day
-                                    staffing.wards.filter((w: Ward) => !w.hiddenFromCalendar && !w.parentWardId).forEach((w: Ward) => {
-                                        staffing.assignTeamToWardDay(period, day, w.id, draggedTeamId);
-                                    });
+                                    const wardIds = staffing.wards.filter((w: Ward) => !w.hiddenFromCalendar && !w.parentWardId).map((w: Ward) => w.id);
+                                    staffing.assignTeamToWardsBulk(period, day, wardIds, draggedTeamId);
                                     setDraggedTeamId(null);
                                 }
                             }}
