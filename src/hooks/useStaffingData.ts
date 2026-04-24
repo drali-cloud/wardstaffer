@@ -13,7 +13,7 @@ export function useStaffingData() {
   const [data, setData] = useState<StaffingData>({ doctors: [], wards: [], assignments: [], shifts: [], logs: [] });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[], slots?: any, durations?: any, slotLabels?: any, fatigueGap?: number, balanceThreshold?: number, referralMaleOnly?: boolean }>({ men: [], women: [], pediatric: [] });
+  const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[], slots?: any, durations?: any, slotLabels?: any, fatigueGap?: number, balanceThreshold?: number, referralMaleOnly?: boolean, referralBufferDays?: number }>({ men: [], women: [], pediatric: [] });
 
   const allWards = useMemo(() => {
     return [
@@ -416,7 +416,8 @@ export function useStaffingData() {
         const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
         const durations = config.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
         const fatigueGap = config.fatigueGap ?? 12;
-        const referralMaleOnly = config.referralMaleOnly !== false; // default true
+        const referralMaleOnly = config.referralMaleOnly !== false;
+        const referralBufferDays = config.referralBufferDays ?? 1; // days free before/after referral
         
         const categories = [
             { id: 'referral', name: 'Daily Referral', slots: slots.referral, wards: [...config.men, ...config.women, ...config.pediatric], duration: durations.referral ?? 24, maleOnly: referralMaleOnly },
@@ -462,7 +463,20 @@ export function useStaffingData() {
                             });
                         };
 
-                        // Pass 1: Strict (ward 12h rest + ER cross-day 12h rest)
+                        // Helper: does candidate have any shift within referralBufferDays of a referral?
+                        const hasReferralBufferConflict = (candidate: string): boolean => {
+                            if (cat.id !== 'referral') return false; // only applies to referral category
+                            const allDayShifts = [
+                                ...wardShifts.filter(x => x.doctorId === candidate),
+                                ...newERShifts.filter(x => x.doctorId === candidate)
+                            ];
+                            for (let offset = 1; offset <= referralBufferDays; offset++) {
+                                if (allDayShifts.some(x => x.day === day - offset || x.day === day + offset)) return true;
+                            }
+                            return false;
+                        };
+
+                        // Pass 1: Strict (ward 12h rest + ER cross-day 12h rest + referral buffer)
                         let eligible = poolArray
                             .filter(candidate => {
                                 const doc = doctorMap.get(candidate);
@@ -478,10 +492,10 @@ export function useStaffingData() {
                                 const yesterdayWardConflict = hasWardShiftYesterday && !isNightCall;
                                 const tomorrowWardConflict  = hasWardShiftTomorrow  && isNightCall;
 
-                                // NEW: ER-to-ER cross-day 12h rule
                                 const erCrossConflict = hasERConflictYesterday(candidate);
+                                const refBufferConflict = hasReferralBufferConflict(candidate);
 
-                                return !hasWardShiftToday && !yesterdayWardConflict && !tomorrowWardConflict && !hasOtherERToday && !erCrossConflict;
+                                return !hasWardShiftToday && !yesterdayWardConflict && !tomorrowWardConflict && !hasOtherERToday && !erCrossConflict && !refBufferConflict;
                             })
                             .sort((a, b) => hoursMap[a] - hoursMap[b]);
 
@@ -495,19 +509,22 @@ export function useStaffingData() {
                                     const hasWardShiftToday = wardShifts.some(x => x.day === day && x.doctorId === candidate);
                                     const hasOtherERToday   = newERShifts.some(x => x.day === day && x.doctorId === candidate);
                                     const erCrossConflict   = hasERConflictYesterday(candidate);
+                                    const refBufferConflict = hasReferralBufferConflict(candidate);
 
-                                    return !hasWardShiftToday && !hasOtherERToday && !erCrossConflict;
+                                    return !hasWardShiftToday && !hasOtherERToday && !erCrossConflict && !refBufferConflict;
                                 })
                                 .sort((a, b) => hoursMap[a] - hoursMap[b]);
                         }
 
-                        // Pass 3: Last-resort fallback — only same-day conflicts blocked
+                        // Pass 3: Last-resort — only same-day and referral buffer blocked
                         if (eligible.length === 0) {
                             eligible = poolArray
                                 .filter(candidate => {
                                     const doc = doctorMap.get(candidate);
                                     if (cat.maleOnly && doc?.gender !== 'Male') return false;
-                                    return !newERShifts.some(x => x.day === day && x.doctorId === candidate);
+                                    const sameDay = newERShifts.some(x => x.day === day && x.doctorId === candidate);
+                                    const refBufferConflict = hasReferralBufferConflict(candidate);
+                                    return !sameDay && !refBufferConflict;
                                 })
                                 .sort((a, b) => hoursMap[a] - hoursMap[b]);
                         }
@@ -580,13 +597,27 @@ export function useStaffingData() {
         const SLOT_END   = [14, 20, 26, 32];
         const fatigueGap = erConfig.fatigueGap ?? 12;
         const balanceThreshold = erConfig.balanceThreshold ?? 12;
+        const referralBufferDays = erConfig.referralBufferDays ?? 1;
 
         const canTakeShift = (doctorId: string, shift: ShiftRecord, shifts: ShiftRecord[]): boolean => {
             const doctorShifts = shifts.filter(s => s.period === period && s.doctorId === doctorId && s.id !== shift.id);
             const isNightER = (shift.slotIndex ?? 0) >= 2;
-            const isWardShift = !shift.wardId.startsWith('er-');
+            const isWardShift = !shift.wardId.startsWith('er-') && shift.wardId !== 'referral';
             const shiftStart = SLOT_START[shift.slotIndex ?? 0] ?? 8;
             const shiftEnd   = SLOT_END[shift.slotIndex ?? 0] ?? 24;
+
+            // Referral buffer: no shift at all within ±referralBufferDays of referral call
+            if (shift.wardId === 'referral') {
+                for (let offset = 1; offset <= referralBufferDays; offset++) {
+                    if (doctorShifts.some(s => s.day === shift.day - offset || s.day === shift.day + offset)) return false;
+                }
+            }
+            // Also block taking any shift if doctor already has a referral within buffer window
+            const hasNearbyReferral = doctorShifts.some(s =>
+                s.wardId === 'referral' &&
+                Math.abs(s.day - shift.day) <= referralBufferDays
+            );
+            if (hasNearbyReferral) return false;
 
             for (const s of doctorShifts) {
                 if (s.day === shift.day) return false;

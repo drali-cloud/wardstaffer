@@ -512,4 +512,77 @@ app.post('/api/logs', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// --- Shift Exchanges ---
+app.get('/api/exchanges', async (req, res) => {
+    await getTablesReady();
+    if (isUsingMock) return res.json((mockDb.exchanges || []));
+    try {
+        const sql = getSql();
+        await sql(`CREATE TABLE IF NOT EXISTS shift_exchanges (
+            id TEXT PRIMARY KEY,
+            "requesterId" TEXT NOT NULL,
+            "requesterShiftId" TEXT NOT NULL,
+            "targetDoctorId" TEXT NOT NULL,
+            "targetShiftId" TEXT NOT NULL,
+            period TEXT NOT NULL,
+            message TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            "adminNote" TEXT,
+            "createdAt" TEXT NOT NULL,
+            "resolvedAt" TEXT
+        )`);
+        const rows = await sql('SELECT * FROM shift_exchanges ORDER BY "createdAt" DESC');
+        res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/exchanges', async (req, res) => {
+    await getTablesReady();
+    const ex = req.body;
+    if (isUsingMock) {
+        if (!mockDb.exchanges) mockDb.exchanges = [];
+        mockDb.exchanges.unshift(ex);
+        return res.status(201).json({ success: true });
+    }
+    try {
+        const sql = getSql();
+        await sql(`CREATE TABLE IF NOT EXISTS shift_exchanges (
+            id TEXT PRIMARY KEY,
+            "requesterId" TEXT NOT NULL,
+            "requesterShiftId" TEXT NOT NULL,
+            "targetDoctorId" TEXT NOT NULL,
+            "targetShiftId" TEXT NOT NULL,
+            period TEXT NOT NULL,
+            message TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            "adminNote" TEXT,
+            "createdAt" TEXT NOT NULL,
+            "resolvedAt" TEXT
+        )`);
+        await sql(`INSERT INTO shift_exchanges (id, "requesterId", "requesterShiftId", "targetDoctorId", "targetShiftId", period, message, status, "adminNote", "createdAt", "resolvedAt")
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            [ex.id, ex.requesterId, ex.requesterShiftId, ex.targetDoctorId, ex.targetShiftId, ex.period, ex.message || '', ex.status || 'pending', ex.adminNote || null, ex.createdAt, ex.resolvedAt || null]);
+        res.status(201).json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/exchanges/:id', async (req, res) => {
+    await getTablesReady();
+    const { status, adminNote } = req.body;
+    const resolvedAt = new Date().toISOString();
+    if (isUsingMock) {
+        if (mockDb.exchanges) {
+            const idx = mockDb.exchanges.findIndex(e => e.id === req.params.id);
+            if (idx > -1) mockDb.exchanges[idx] = { ...mockDb.exchanges[idx], status, adminNote, resolvedAt };
+        }
+        return res.json({ success: true });
+    }
+    try {
+        const sql = getSql();
+        await sql(`UPDATE shift_exchanges SET status=$1, "adminNote"=$2, "resolvedAt"=$3 WHERE id=$4`,
+            [status, adminNote || null, resolvedAt, req.params.id]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default app;

@@ -53,7 +53,27 @@ export interface Assignment {
 export interface AuditLog {
   id: string;
   timestamp: string;
-  action: 'swap_er' | 'auto_balance' | 'manual_assign';
+  action: 'swap_er' | 'auto_balance' | 'manual_assign' | 'exchange_approved' | 'exchange_rejected';
   details: string;
   period: string;
+}
+
+export interface ShiftExchange {
+  id: string;
+  requesterId: string;       // doctor proposing the exchange
+  requesterShiftId: string;  // their shift they want to give away
+  targetDoctorId: string;    // doctor they want to swap with
+  targetShiftId: string;     // target doctor's shift they want to receive
+  period: string;            // YYYY-MM
+  message?: string;          // optional note from requester
+  // 3-stage workflow:
+  // pending_target  → submitted by requester, waiting for target to accept/decline
+  // target_accepted → target accepted; now visible to admin
+  // target_declined → target declined; closed
+  // approved        → admin approved and swap applied
+  // rejected        → admin rejected
+  status: 'pending_target' | 'target_accepted' | 'target_declined' | 'approved' | 'rejected';
+  adminNote?: string;        // admin feedback
+  createdAt: string;
+  resolvedAt?: string;
 }
