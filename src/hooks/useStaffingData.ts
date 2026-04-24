@@ -384,6 +384,58 @@ export function useStaffingData() {
     } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
   }, [data.assignments, data.shifts]);
 
+  // One-way transfer: move docA from wardA → wardB without needing a swap partner.
+  // Removes docA from the source assignment, adds to the target assignment,
+  // and re-stamps all their ward shifts for this period to the target ward.
+  const movePoolDoctor = useCallback(async (period: string, wardA: string, docA: string, wardB: string) => {
+    if (wardA === wardB) return;
+    setSyncing(true);
+    try {
+        const assignments = data.assignments.filter(a => a.period === period);
+        const srcAssignment = assignments.find(a => a.wardId === wardA);
+        const dstAssignment = assignments.find(a => a.wardId === wardB);
+        if (!srcAssignment) return;
+
+        // Remove doctor from source
+        const newSrc = { ...srcAssignment, doctorIds: srcAssignment.doctorIds.filter(id => id !== docA) };
+        // Add doctor to destination (create if not exists)
+        const newDst = dstAssignment
+            ? { ...dstAssignment, doctorIds: [...dstAssignment.doctorIds, docA] }
+            : { id: `${period}-${wardB}`, period, wardId: wardB, doctorIds: [docA] };
+
+        // Re-stamp all ward shifts for this doctor in this period to the target ward
+        const updatedShifts = data.shifts.map(s => {
+            if (s.period !== period || s.doctorId !== docA) return s;
+            if (s.wardId === wardA) return { ...s, wardId: wardB };
+            return s;
+        });
+        const shiftsToPersist = updatedShifts.filter(s => s.period === period && s.doctorId === docA);
+
+        const requests: Promise<any>[] = [
+            fetch(`/api/assignments/${newSrc.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newSrc) }),
+            dstAssignment
+                ? fetch(`/api/assignments/${newDst.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newDst) })
+                : fetch('/api/assignments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newDst) }).catch(() =>
+                    fetch(`/api/assignments/${newDst.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newDst) })
+                ),
+        ];
+        if (shiftsToPersist.length > 0) {
+            requests.push(fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(shiftsToPersist) }));
+        }
+        await Promise.all(requests);
+
+        setData(prev => ({
+            ...prev,
+            assignments: [
+                ...prev.assignments.filter(a => a.id !== newSrc.id && a.id !== newDst.id),
+                newSrc,
+                newDst,
+            ],
+            shifts: updatedShifts,
+        }));
+    } catch (e) { alert('Transfer failed.'); } finally { setSyncing(false); }
+  }, [data.assignments, data.shifts]);
+
   const swapShiftDoctors = useCallback(async (period: string, shiftIdA: string, shiftIdB: string) => {
     setSyncing(true);
     try {
@@ -1032,5 +1084,5 @@ export function useStaffingData() {
     } catch (e) { console.error(e); } finally { setSyncing(false); }
   }, [data.shifts, doctorMap, wardMap, addLog]);
 
-  return { ...data, wards: allWards, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict };
+  return { ...data, wards: allWards, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, movePoolDoctor, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict };
 }

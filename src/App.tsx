@@ -1191,7 +1191,18 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
                             <thead><tr className="bg-slate-50/50"><th className="col-header">Ward Unit</th><th className="col-header">Personnel Pool</th></tr></thead>
                             <tbody className="text-sm divide-y divide-slate-100">
                                 {periodAssignments.map((a: Assignment) => (
-                                    <tr key={a.id}>
+                                    <tr
+                                        key={a.id}
+                                        onDragOver={(e) => { if (isAdmin && dragState && dragState.wardId !== a.wardId) e.preventDefault(); }}
+                                        onDrop={(e) => {
+                                            // Only fire if the drop landed on the row itself (empty space),
+                                            // not on a child doctor badge (those stop propagation).
+                                            if (!dragState || !isAdmin || dragState.wardId === a.wardId) return;
+                                            staffing.movePoolDoctor(selectedPeriod, dragState.wardId, dragState.doctorId, a.wardId);
+                                            setDragState(null);
+                                        }}
+                                        className={`transition-colors ${isAdmin && dragState && dragState.wardId !== a.wardId ? 'ring-2 ring-inset ring-blue-400/40 bg-blue-50/30' : ''}`}
+                                    >
                                         <td className="px-6 py-4 font-bold text-slate-700">{staffing.wardMap.get(a.wardId)?.name}</td>
                                         <td className="px-6 py-4">
                                             <div className="flex flex-wrap gap-2">
@@ -1201,8 +1212,9 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
                                                         onClick={() => onNavigate(id)}
                                                         draggable={isAdmin}
                                                         onDragStart={() => setDragState({ doctorId: id, wardId: a.wardId })}
-                                                        onDragOver={(e) => isAdmin && e.preventDefault()}
-                                                        onDrop={() => {
+                                                        onDragOver={(e) => { if (isAdmin) { e.preventDefault(); e.stopPropagation(); } }}
+                                                        onDrop={(e) => {
+                                                            e.stopPropagation(); // prevent row-level drop from also firing
                                                             if (!dragState || !isAdmin || dragState.doctorId === id) return;
                                                             staffing.swapPoolDoctors(selectedPeriod, dragState.wardId, dragState.doctorId, a.wardId, id);
                                                             setDragState(null);
@@ -1212,6 +1224,12 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
                                                         {staffing.doctorMap.get(id)?.name}
                                                     </span>
                                                 ))}
+                                                {/* Visual hint when dragging over this ward's empty area */}
+                                                {isAdmin && dragState && dragState.wardId !== a.wardId && (
+                                                    <span className="px-3 py-1 border-2 border-dashed border-blue-300 rounded-lg text-[10px] font-bold uppercase text-blue-400 animate-pulse pointer-events-none">
+                                                        + Move here
+                                                    </span>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
