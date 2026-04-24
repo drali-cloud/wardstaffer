@@ -346,6 +346,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
     const firstDayIdx = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1).getDay();
 
     const deactivatedDays = staffing.erConfig.deactivatedDays?.[period] || [];
+    const erShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'));
 
     const toggleDayActivation = (day: number) => {
         if (!isAdmin) return;
