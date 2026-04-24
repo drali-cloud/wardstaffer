@@ -574,10 +574,10 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                                     };
                                     const lbls = cfg?.slotLabels || defLabels;
                                     return (<>
-                                        <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={lbls.men || defLabels.men} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} />
-                                        <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={lbls.women || defLabels.women} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} />
-                                        <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={lbls.pediatric || defLabels.pediatric} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} />
-                                        <ERModalColumn title="Daily Referral" wardId="referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={lbls.referral || defLabels.referral} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} />
+                                        <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={lbls.men || defLabels.men} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} onDropTeam={(tId) => staffing.assignTeamToERCategory(period, selectedDay!, 'er-men', tId)} draggedTeamId={draggedTeamId} />
+                                        <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={lbls.women || defLabels.women} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} onDropTeam={(tId) => staffing.assignTeamToERCategory(period, selectedDay!, 'er-women', tId)} draggedTeamId={draggedTeamId} />
+                                        <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={lbls.pediatric || defLabels.pediatric} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} onDropTeam={(tId) => staffing.assignTeamToERCategory(period, selectedDay!, 'er-pediatric', tId)} draggedTeamId={draggedTeamId} />
+                                        <ERModalColumn title="Daily Referral" wardId="referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={lbls.referral || defLabels.referral} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} erConfig={cfg} onDropTeam={(tId) => staffing.assignTeamToERCategory(period, selectedDay!, 'referral', tId)} draggedTeamId={draggedTeamId} />
                                     </>);
                                 })()}
                             </div>
@@ -590,9 +590,10 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
     );
 });
 
-function ERModalColumn({ title, wardId, day, period, staffing, color, slots, erConfig, onNavigate, onClose, onDragShift, draggedShift }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green' | 'indigo', slots: string[], erConfig: any, onNavigate: (id: string) => void, onClose: () => void, onDragShift: (s: ShiftRecord | null) => void, draggedShift: ShiftRecord | null }) {
+function ERModalColumn({ title, wardId, day, period, staffing, color, slots, erConfig, onNavigate, onClose, onDragShift, draggedShift, onDropTeam, draggedTeamId }: { title: string, wardId: string, day: number, period: string, staffing: any, color: 'blue' | 'pink' | 'green' | 'indigo', slots: string[], erConfig: any, onNavigate: (id: string) => void, onClose: () => void, onDragShift: (s: ShiftRecord | null) => void, draggedShift: ShiftRecord | null, onDropTeam: (tId: string) => void, draggedTeamId: string | null }) {
     const dayShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.day === day && s.wardId === wardId);
     const colors: any = { blue: 'text-blue-600 bg-blue-50 border-blue-100', pink: 'text-pink-600 bg-pink-50 border-pink-100', green: 'text-green-600 bg-green-50 border-green-100', indigo: 'text-indigo-600 bg-indigo-50 border-indigo-100' };
+    const isAdmin = true;
 
     // Derive slot capacity from erConfig, falling back to hardcoded defaults
     const defaultSlots = { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
@@ -601,8 +602,19 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, erC
     const slotCapacities: number[] = configSlots[catKey] || defaultSlots[catKey] || [1];
 
     return (
-        <div className="space-y-4">
-            <h4 className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full w-fit ${colors[color]}`}>{title} Department</h4>
+        <div 
+            className={`space-y-4 p-4 rounded-3xl border ${draggedTeamId ? 'border-dashed border-indigo-400 bg-indigo-50/20' : 'border-transparent'} transition-all`}
+            onDragOver={e => isAdmin && e.preventDefault()}
+            onDrop={() => {
+                if (draggedTeamId && isAdmin) {
+                    onDropTeam(draggedTeamId);
+                }
+            }}
+        >
+            <div className={`flex items-center justify-between p-3 rounded-2xl border ${colors[color]} shadow-sm`}>
+                <h4 className="text-[10px] font-black uppercase tracking-widest">{title}</h4>
+                <div className="flex items-center gap-1.5"><div className={`w-1.5 h-1.5 rounded-full ${color === 'blue' ? 'bg-blue-500' : color === 'pink' ? 'bg-pink-500' : color === 'green' ? 'bg-green-500' : 'bg-indigo-500'}`} /><span className="text-[9px] font-bold opacity-70">{dayShifts.length} Assigned</span></div>
+            </div>
             <div className="space-y-3">
                 {slots.map((time, idx) => {
                     const slotShifts = dayShifts.filter(s => s.slotIndex === idx);

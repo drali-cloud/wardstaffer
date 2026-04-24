@@ -876,6 +876,47 @@ export function useStaffingData() {
     } catch (e: any) { alert(`Ward assignment failed: ${e.message}`); } finally { setSyncing(false); }
   }, [teams, data.wards]);
 
+  const assignTeamToERCategory = useCallback(async (period: string, day: number, wardId: string, teamId: string) => {
+    setSyncing(true);
+    try {
+        const team = teams.find(t => t.id === teamId);
+        if (!team || team.memberIds.length === 0) return;
+
+        const config = erConfig;
+        const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+        const catKey = wardId === 'referral' ? 'referral' : wardId.replace('er-', '') as 'men'|'women'|'pediatric';
+        const catSlots = slots[catKey] || [1];
+
+        const newCategoryShifts: ShiftRecord[] = [];
+        let memberIdx = 0;
+        catSlots.forEach((staffCount, slotIdx) => {
+            for (let s = 0; s < staffCount; s++) {
+                const dId = team.memberIds[memberIdx % team.memberIds.length];
+                newCategoryShifts.push({
+                    id: `er-cat-manual-${period}-${day}-${wardId}-${slotIdx}-${s}`,
+                    period, day, wardId, doctorId: dId, slotIndex: slotIdx
+                });
+                memberIdx++;
+            }
+        });
+
+        const resp = await fetch('/api/shifts', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(newCategoryShifts) 
+        });
+        if (!resp.ok) throw new Error('Failed to save category assignment');
+
+        setData(prev => ({ 
+            ...prev, 
+            shifts: [
+                ...prev.shifts.filter(s => !(s.period === period && s.day === day && s.wardId === wardId)), 
+                ...newCategoryShifts
+            ] 
+        }));
+    } catch (e: any) { alert(`Category assignment failed: ${e.message}`); } finally { setSyncing(false); }
+  }, [teams, erConfig]);
+
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
     executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
   }, [executeAction]);
