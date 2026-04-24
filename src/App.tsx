@@ -538,7 +538,7 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, erC
     );
 }
 
-function LoginPage({ onLogin }: { onLogin: (u: string, p: string) => Promise<boolean>, isLoading: boolean }) {
+function LoginPage({ onLogin }: { onLogin: (u: string, p: string) => Promise<boolean>, isLoading?: boolean }) {
     const [name, setName] = useState('');
     const [pass, setPass] = useState('');
     const [error, setError] = useState('');
@@ -1395,7 +1395,7 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
 
                 const refHours = doctorShifts
                     .filter((s: any) => s.wardId === 'referral')
-                    .reduce((total: number) => total + (dur.referral ?? 24), 0);
+                    .reduce((total: number, _s: any) => total + (dur.referral ?? 24), 0);
 
                 return {
                     ...d,
@@ -2020,7 +2020,7 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
             {/* My outgoing requests */}
             {!loading && tab === 'outgoing' && !isAdmin && (
                 <div className="space-y-4">
-                    {outgoing.length === 0 ? <EmptyState msg="No outgoing requests for this period." /> : outgoing.map(ex => <ExchangeCard key={ex.id} ex={ex} />)}
+                    {outgoing.length === 0 ? <EmptyState msg="No outgoing requests for this period." /> : outgoing.map(ex => <React.Fragment key={ex.id}><ExchangeCard ex={ex} /></React.Fragment>)}
                 </div>
             )}
 
@@ -2029,7 +2029,7 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
                 <div className="space-y-4">
                     {incoming.length === 0
                         ? <EmptyState msg="No incoming offers awaiting your response." />
-                        : incoming.map(ex => <ExchangeCard key={ex.id} ex={ex} showTargetActions />)}
+                        : incoming.map(ex => <React.Fragment key={ex.id}><ExchangeCard ex={ex} showTargetActions /></React.Fragment>)}
                 </div>
             )}
 
@@ -2038,11 +2038,11 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
                 <div className="space-y-4">
                     {adminQueue.length === 0
                         ? <EmptyState msg="No mutually-agreed requests awaiting admin review." />
-                        : adminQueue.map(ex => <ExchangeCard key={ex.id} ex={ex} showAdminActions />)}
+                        : adminQueue.map(ex => <React.Fragment key={ex.id}><ExchangeCard ex={ex} showAdminActions /></React.Fragment>)}
                     {periodEx.filter(e => e.status !== 'target_accepted' && e.status !== 'pending_target').length > 0 && (
                         <div className="mt-8">
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Resolved History</p>
-                            <div className="space-y-3">{periodEx.filter(e => ['approved','rejected','target_declined'].includes(e.status)).map(ex => <ExchangeCard key={ex.id} ex={ex} />)}</div>
+                            <div className="space-y-3">{periodEx.filter(e => ['approved','rejected','target_declined'].includes(e.status)).map(ex => <React.Fragment key={ex.id}><ExchangeCard ex={ex} /></React.Fragment>)}</div>
                         </div>
                     )}
                 </div>

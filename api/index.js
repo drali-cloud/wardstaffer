@@ -425,8 +425,8 @@ app.delete('/api/shifts', async (req, res) => {
   try {
     const sql = getSql();
     if (period) {
-        if (type === 'er') await sql("DELETE FROM shifts WHERE period = $1 AND \"wardId\" LIKE 'er-%'", [period]);
-        else if (type === 'ward') await sql("DELETE FROM shifts WHERE period = $1 AND \"wardId\" NOT LIKE 'er-%'", [period]);
+        if (type === 'er') await sql("DELETE FROM shifts WHERE period = $1 AND (\"wardId\" LIKE 'er-%' OR \"wardId\" = 'referral')", [period]);
+        else if (type === 'ward') await sql("DELETE FROM shifts WHERE period = $1 AND \"wardId\" NOT LIKE 'er-%' AND \"wardId\" != 'referral'", [period]);
         else await sql('DELETE FROM shifts WHERE period = $1', [period]);
     } else await sql('DELETE FROM shifts');
     res.json({ success: true });

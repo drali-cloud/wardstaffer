@@ -493,7 +493,6 @@ export function useStaffingData() {
         });
 
         // Target: 6–10 ER calls per doctor. Hard ceiling prevents extreme overload.
-        const ER_CALL_SOFT_MIN = 6;
         const ER_CALL_SOFT_MAX = 10;
         const ER_CALL_HARD_CAP = 11; // allow +1 overflow only if no other candidate exists
 
@@ -626,9 +625,19 @@ export function useStaffingData() {
             });
         }
 
-        await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newERShifts) });
+        // Persist: wipe old ER + referral shifts for this period, then save the fresh set
+        const delResp = await fetch('/api/shifts', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ period, type: 'er' })
+        });
+        if (!delResp.ok) throw new Error('Failed to clear old ER shifts from database');
+
+        const saveResp = await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newERShifts) });
+        if (!saveResp.ok) throw new Error('Failed to save ER shifts to database');
+
         setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'))), ...newERShifts] }));
-    } catch (e) { alert('ER calculation failed.'); } finally { setSyncing(false); }
+    } catch (e: any) { alert(`ER calculation failed: ${e.message}`); } finally { setSyncing(false); }
   }, [data]);
 
   const importData = useCallback(async (newData: Partial<StaffingData>) => {
@@ -660,7 +669,6 @@ export function useStaffingData() {
             newAssignments.push({ id: `${period}-${wardId}`, period, wardId, doctorIds: [doctorId] });
         }
 
-        const doc = data.doctors.find(d => d.id === doctorId);
         const updatedDocs = data.doctors.map(d => d.id === doctorId && !d.previousWards.includes(wardId) ? { ...d, previousWards: [...d.previousWards, wardId] } : d);
 
         await fetch('/api/dispatch', { 
@@ -987,11 +995,11 @@ export function useStaffingData() {
   }, [data]);
 
 
-  const addLog = useCallback(async (action: string, details: string, period: string) => {
+  const addLog = useCallback(async (action: AuditLog['action'], details: string, period: string) => {
     const newLog: AuditLog = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       timestamp: new Date().toISOString(),
-      action: action as any,
+      action,
       details,
       period
     };

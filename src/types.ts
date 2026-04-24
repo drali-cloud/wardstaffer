@@ -53,7 +53,7 @@ export interface Assignment {
 export interface AuditLog {
   id: string;
   timestamp: string;
-  action: 'swap_er' | 'auto_balance' | 'manual_assign' | 'exchange_approved' | 'exchange_rejected';
+  action: 'swap_er' | 'auto_balance' | 'manual_assign' | 'exchange_approved' | 'exchange_rejected' | 'auto_resolve';
   details: string;
   period: string;
 }
