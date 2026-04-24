@@ -403,7 +403,29 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                     <div className="flex items-center justify-between md:justify-end gap-2">
                         <div className="flex gap-1"><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowLeft className="w-4 h-4" /></button><button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 hover:bg-slate-50 rounded-lg border border-slate-200"><ArrowRight className="w-4 h-4" /></button></div>
                         {isAdmin && (
-                            <button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex-1 md:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-3.5 h-3.5" /> Calculate Rotation</button>
+                            <>
+                                <button 
+                                    onClick={() => {
+                                        const weekends: number[] = [];
+                                        for (let d = 1; d <= daysInMonth; d++) {
+                                            const dayDate = new Date(targetDate.getFullYear(), targetDate.getMonth(), d);
+                                            if (dayDate.getDay() === 0 || dayDate.getDay() === 6) weekends.push(d);
+                                        }
+                                        const newConfig = {
+                                            ...staffing.erConfig,
+                                            deactivatedDays: {
+                                                ...(staffing.erConfig.deactivatedDays || {}),
+                                                [period]: [...new Set([...(staffing.erConfig.deactivatedDays?.[period] || []), ...weekends])]
+                                            }
+                                        };
+                                        staffing.updateERConfig(newConfig);
+                                    }}
+                                    className="flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-slate-100 text-slate-600 px-4 py-2.5 rounded-xl hover:bg-slate-200 transition-all"
+                                >
+                                    <PowerOff className="w-3.5 h-3.5" /> Deactivate Weekends
+                                </button>
+                                <button onClick={() => staffing.calculateERCalls(period, staffing.erConfig)} className="flex-1 md:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase bg-amber-600 text-white px-4 py-2.5 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 transition-all"><RefreshCw className="w-3.5 h-3.5" /> Calculate Rotation</button>
+                            </>
                         )}
                     </div>
                 </div>
@@ -453,9 +475,9 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); toggleDayActivation(day); }}
                                         title={isDeactivated ? "Activate Day" : "Deactivate Day"}
-                                        className={`p-1 rounded-md transition-colors ${isDeactivated ? 'text-red-500 hover:bg-red-50' : 'text-slate-200 hover:text-green-500 hover:bg-green-50'}`}
+                                        className={`p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center ${isDeactivated ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-slate-100 text-slate-400 hover:text-green-600 hover:bg-green-50 hover:ring-1 hover:ring-green-200'}`}
                                     >
-                                        {isDeactivated ? <PowerOff className="w-3 h-3" /> : <Power className="w-3 h-3" />}
+                                        {isDeactivated ? <PowerOff className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
                                     </button>
                                 )}
                             </div>
