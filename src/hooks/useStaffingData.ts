@@ -15,8 +15,20 @@ export function useStaffingData() {
   const [syncing, setSyncing] = useState(false);
   const [erConfig, setErConfig] = useState<{ men: string[], women: string[], pediatric: string[] }>({ men: [], women: [], pediatric: [] });
 
+  const allWards = useMemo(() => {
+    return [
+      ...data.wards,
+      {
+        id: 'referral',
+        name: 'Daily Referral',
+        requirements: { totalDoctors: 0, genderDiversity: 'Specific', requiredMale: 1, requiredFemale: 0, shiftDuration: '24h', staffPerShift: 1 },
+        hiddenFromCalendar: false
+      }
+    ] as Ward[];
+  }, [data.wards]);
+
   const doctorMap = useMemo(() => new Map(data.doctors.map(d => [d.id, d])), [data.doctors]);
-  const wardMap = useMemo(() => new Map(data.wards.map(w => [w.id, w])), [data.wards]);
+  const wardMap = useMemo(() => new Map(allWards.map(w => [w.id, w])), [allWards]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -41,7 +53,7 @@ export function useStaffingData() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const updateERConfig = useCallback(async (newConfig: { men: string[], women: string[], pediatric: string[] }) => {
+  const updateERConfig = useCallback(async (newConfig: any) => {
     setSyncing(true);
     try {
         await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newConfig) });
@@ -183,6 +195,7 @@ export function useStaffingData() {
             
             // Use ward's actual configured shift duration (ICU/CCU may be 12h, not 24h)
             const ward = data.wards.find(w => w.id === s.wardId);
+            if (ward?.requirements?.shiftWeight !== undefined) return total + ward.requirements.shiftWeight;
             const duration = ward?.requirements?.shiftDuration;
             if (duration === '6h') return total + 6;
             if (duration === '12h') return total + 12;
@@ -381,18 +394,20 @@ export function useStaffingData() {
     } catch (e) { alert('Shift swap failed.'); } finally { setSyncing(false); }
   }, [data.shifts]);
 
-  const calculateERCalls = useCallback(async (period: string, config: { men: string[], women: string[], pediatric: string[] }) => {
+  const calculateERCalls = useCallback(async (period: string, config: any) => {
     setSyncing(true);
     try {
         const daysInMonth = new Date(parseInt(period.split('-')[0]), parseInt(period.split('-')[1]), 0).getDate();
         const wardShifts = data.shifts.filter(s => s.period === period);
         const newERShifts: ShiftRecord[] = [];
         
+        const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+        
         const categories = [
-            { id: 'er-referral', name: 'Daily Referral', slots: [1], wards: [...config.men, ...config.women, ...config.pediatric], duration: 24, maleOnly: true },
-            { id: 'er-men', name: 'Men', slots: [2, 4, 4, 2], wards: config.men, duration: 6 },
-            { id: 'er-women', name: 'Women', slots: [2, 4, 4, 2], wards: config.women, duration: 6 },
-            { id: 'er-pediatric', name: 'Pediatric', slots: [1, 1, 1], wards: config.pediatric, duration: 8 }
+            { id: 'referral', name: 'Daily Referral', slots: slots.referral, wards: [...config.men, ...config.women, ...config.pediatric], duration: 24, maleOnly: true },
+            { id: 'er-men', name: 'Men', slots: slots.men, wards: config.men, duration: 6 },
+            { id: 'er-women', name: 'Women', slots: slots.women, wards: config.women, duration: 6 },
+            { id: 'er-pediatric', name: 'Pediatric', slots: slots.pediatric, wards: config.pediatric, duration: 8 }
         ];
 
         // Track cumulative hours per doctor for the period, starting with ward shifts
@@ -648,7 +663,7 @@ export function useStaffingData() {
             let bestMove: { type: 'move' | 'swap', shiftId: string, otherShiftId?: string, toDocId: string } | null = null;
 
             const getDuration = (s: ShiftRecord) => {
-                if (s.wardId === 'er-referral') return 24;
+                if (s.wardId === 'referral') return 24;
                 if (s.wardId === 'er-men' || s.wardId === 'er-women') return 6;
                 if (s.wardId === 'er-pediatric') return 8;
                 return 12;
@@ -663,7 +678,7 @@ export function useStaffingData() {
 
                     // A. MOVE
                     for (const s of fromER.sort((a,b) => getDuration(b) - getDuration(a))) {
-                        if (s.wardId === 'er-referral' && doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
+                        if (s.wardId === 'referral' && doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
                         if (canTakeShift(toDoc.id, s, currentShifts)) {
                             const dur = getDuration(s);
                             if (toDoc.hours + dur < fromDoc.hours) {
@@ -674,8 +689,8 @@ export function useStaffingData() {
                     }
 
                     // B. SWAP
-                    const fromRefs = fromER.filter(s => s.wardId === 'er-referral');
-                    const toSmall = toER.filter(s => s.wardId !== 'er-referral');
+                    const fromRefs = fromER.filter(s => s.wardId === 'referral');
+                    const toSmall = toER.filter(s => s.wardId !== 'referral');
                     for (const ref of fromRefs) {
                         if (doctorMap.get(toDoc.id)?.gender !== 'Male') continue;
                         for (const small of toSmall) {
@@ -789,7 +804,7 @@ export function useStaffingData() {
     try {
         let currentShifts = [...data.shifts];
         const maleDoctors = data.doctors.filter(d => d.gender === 'Male' && d.id !== 'root');
-        const referralShifts = currentShifts.filter(s => s.period === period && s.wardId === 'er-referral');
+        const referralShifts = currentShifts.filter(s => s.period === period && s.wardId === 'referral');
 
         for (const shift of referralShifts) {
             const stats = maleDoctors.map(d => ({
@@ -902,5 +917,5 @@ export function useStaffingData() {
     } catch (e) { console.error(e); } finally { setSyncing(false); }
   }, [data.shifts, doctorMap, wardMap, addLog]);
 
-  return { ...data, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict };
+  return { ...data, wards: allWards, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict };
 }

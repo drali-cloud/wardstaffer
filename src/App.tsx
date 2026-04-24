@@ -1,16 +1,16 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-    Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CircleCheck, Scale, History, RotateCcw, TriangleAlert, CircleX, Filter, Zap
+    Users, Hospital, ClipboardList, FileUp, Plus, Trash2, Download, Calendar, ChevronRight, UserPlus, Edit2, RefreshCw, Archive, Save, ChevronLeft, User, LogOut, Shield, Clock, MapPin, Lock, Key, X, Check, Activity, ListChecks, ArrowLeft, ArrowRight, Link, CircleCheck, Scale, History, RotateCcw, TriangleAlert, CircleX, Filter, Zap, Settings, Database, UploadCloud, AlertOctagon, ArrowRightLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStaffingData } from './hooks/useStaffingData';
 import { Doctor, Ward, Gender, Assignment, ShiftRecord, AuditLog } from './types';
 import * as XLSX from 'xlsx';
 
-type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar' | 'equity' | 'er_calls';
+type View = 'dashboard' | 'doctors' | 'wards' | 'archive' | 'assignments' | 'profile' | 'calendar' | 'equity' | 'er_calls' | 'settings' | 'exchange';
 
 const getSlotName = (slotIdx: number, wardId: string = '') => {
-    if (wardId === 'er-referral') return '24h Call';
+    if (wardId === 'referral') return '24h Call';
     if (wardId === 'er-pediatric') {
         if (slotIdx === 0) return 'Morning';
         if (slotIdx === 1) return 'Post Morning';
@@ -111,7 +111,9 @@ export default function App() {
                     <NavItem active={currentView === 'calendar'} onClick={() => { setCurrentView('calendar'); setSidebarOpen(false); }} label="Shift Calendar" icon={<Calendar className="w-4 h-4" />} />
                     <NavItem active={currentView === 'er_calls'} onClick={() => { setCurrentView('er_calls'); setSidebarOpen(false); }} label="ER On-Call" icon={<Activity className="w-4 h-4 text-amber-500" />} />
                     <NavItem active={currentView === 'archive'} onClick={() => { setCurrentView('archive'); setSelectedPeriod(null); setSidebarOpen(false); }} label="Archives & Roster" icon={<Archive className="w-4 h-4" />} />
+                    {user.role === 'admin' && <NavItem active={currentView === 'exchange'} onClick={() => { setCurrentView('exchange'); setSidebarOpen(false); }} label="Shift Exchange" icon={<ArrowRightLeft className="w-4 h-4 text-emerald-500" />} />}
                     {user.role === 'admin' && <NavItem active={currentView === 'equity'} onClick={() => { setCurrentView('equity'); setSidebarOpen(false); }} label="Equity Engine" icon={<Scale className="w-4 h-4 text-blue-400" />} />}
+                    {user.role === 'admin' && <NavItem active={currentView === 'settings'} onClick={() => { setCurrentView('settings'); setSidebarOpen(false); }} label="Control Panel" icon={<Settings className="w-4 h-4 text-slate-400" />} />}
                 </nav>
                 <div className="p-6 border-t border-slate-800 bg-slate-950/50">
                     <div className="space-y-4">
@@ -135,7 +137,7 @@ export default function App() {
                     <div className="max-w-7xl mx-auto">
                         <AnimatePresence mode="wait">
                             <motion.div key={currentView + viewingDoctorId + (selectedPeriod || '')} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
-                                {currentView === 'dashboard' && <DashboardView staffing={staffing} user={user} onNavigate={navigateToDoctor} />}
+                                {currentView === 'dashboard' && <DashboardView staffing={staffing} user={user} onNavigate={navigateToDoctor} onNavigateToSettings={() => setCurrentView('settings')} />}
                                 {currentView === 'calendar' && <ShiftCalendarView staffing={staffing} onNavigate={navigateToDoctor} />}
                                 {currentView === 'er_calls' && <ERCallsView staffing={staffing} user={user!} onNavigate={navigateToDoctor} />}
                                 {currentView === 'doctors' && <DoctorsView staffing={staffing} user={user} onNavigate={navigateToDoctor} />}
@@ -144,6 +146,8 @@ export default function App() {
                                 {currentView === 'assignments' && <AssignmentsView staffing={staffing} />}
                                 {currentView === 'profile' && <ProfileView staffing={staffing} user={user} targetDoctorId={viewingDoctorId} />}
                                 {currentView === 'equity' && <EquityView staffing={staffing} onNavigate={navigateToDoctor} />}
+                                {currentView === 'exchange' && <ShiftExchangeView staffing={staffing} />}
+                                {currentView === 'settings' && <ControlPanelView staffing={staffing} />}
                             </motion.div>
                         </AnimatePresence>
                     </div>
@@ -268,7 +272,7 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                     const day = i + 1;
                     const dayShifts = periodShifts.filter((s: ShiftRecord) => s.day === day);
                     const dayShiftsCount = dayShifts.length;
-                    const referralShift = dayShifts.find(s => s.wardId === 'er-referral');
+                    const referralShift = dayShifts.find(s => s.wardId === 'referral');
 
                     return (
                         <div key={day} onClick={() => setSelectedDay(day)} className={`bg-white p-2 min-h-[90px] cursor-pointer hover:bg-blue-50 transition-all border-b border-r border-slate-100 group relative ${selectedDay === day ? 'ring-2 ring-blue-500 z-10' : ''}`}>
@@ -277,7 +281,7 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                                 <div className="mt-2 space-y-1">
                                     <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">{dayShiftsCount} Slots</span></div>
                                     {referralShift && (
-                                        <div className="p-1 bg-amber-100 text-amber-700 border border-amber-200 rounded-[4px] text-[7px] font-black uppercase truncate leading-tight">
+                                        <div className="p-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-[4px] text-[7px] font-black uppercase truncate leading-tight">
                                             REF: {staffing.doctorMap.get(referralShift.doctorId)?.name}
                                         </div>
                                     )}
@@ -319,19 +323,6 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                                         </div>
                                     );
                                 })}
-                                {(() => {
-                                    const refShift = periodShifts.find((s: ShiftRecord) => s.day === selectedDay && s.wardId === 'er-referral');
-                                    if (!refShift) return null;
-                                    return (
-                                        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex items-center justify-between group hover:border-amber-200 transition-all mt-4">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-slate-200 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-all shadow-sm"><Shield className="w-5 h-5" /></div>
-                                                <div><p className="text-sm font-bold text-slate-800">Daily Referral</p><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">24-Hour On-Call Duty</p></div>
-                                            </div>
-                                            <AvatarPopup doctor={staffing.doctorMap.get(refShift.doctorId)} onNavigate={(id: string) => { onNavigate(id); setSelectedDay(null); }} colorClass="bg-amber-100 text-amber-600 hover:bg-amber-600" />
-                                        </div>
-                                    );
-                                })()}
                             </div>
                             <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end"><button onClick={() => setSelectedDay(null)} className="btn-primary px-8">Close Report</button></div>
                         </div>
@@ -462,7 +453,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                                 <ERModalColumn title="Men" wardId="er-men" day={selectedDay} period={period} staffing={staffing} color="blue" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
                                 <ERModalColumn title="Women" wardId="er-women" day={selectedDay} period={period} staffing={staffing} color="pink" slots={['08:00 - 14:00', '14:00 - 20:00', '20:00 - 02:00', '02:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
                                 <ERModalColumn title="Pediatric" wardId="er-pediatric" day={selectedDay} period={period} staffing={staffing} color="green" slots={['08:00 - 16:00', '16:00 - 00:00', '00:00 - 08:00']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
-                                <ERModalColumn title="Daily Referral" wardId="er-referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={['24-Hour Duty Rotation']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
+                                <ERModalColumn title="Daily Referral" wardId="referral" day={selectedDay} period={period} staffing={staffing} color="indigo" slots={['24-Hour Duty Rotation']} onNavigate={onNavigate} onClose={() => setSelectedDay(null)} onDragShift={setDraggedShift} draggedShift={draggedShift} />
                             </div>
                             <div className="p-5 md:p-6 bg-white border-t border-slate-100 flex-shrink-0"><button onClick={() => setSelectedDay(null)} className="w-full bg-blue-600 text-white py-3 rounded-2xl font-bold shadow-lg shadow-blue-600/20 active:scale-95 transition-all text-sm uppercase tracking-widest">Finish Review</button></div>
                         </div>
@@ -500,7 +491,7 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
                                 <span className="text-blue-600">{getSlotName(idx, wardId)}</span>
                             </p>
                             <div className="space-y-2">
-                                {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 1 : (wardId === 'er-referral' ? 1 : 2)) }).map((_, sIdx) => {
+                                {Array.from({ length: isHighDensity ? 4 : (wardId === 'er-pediatric' ? 1 : (wardId === 'referral' ? 1 : 2)) }).map((_, sIdx) => {
                                     const shift = slotShifts[sIdx];
                                     let badgeColor = 'bg-slate-50 text-slate-400';
                                     let roleLabel = '';
@@ -515,7 +506,7 @@ function ERModalColumn({ title, wardId, day, period, staffing, color, slots, onN
                                         }
                                     } else {
                                         badgeColor = shift ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-slate-50 text-slate-400';
-                                        roleLabel = wardId === 'er-referral' ? 'External Referral' : 'General ER';
+                                        roleLabel = wardId === 'referral' ? 'External Referral' : 'General ER';
                                     }
 
                                     return (
@@ -577,8 +568,13 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
     const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
     const myShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.doctorId === effectiveId);
 
-    const erHours = myShifts.filter((s: ShiftRecord) => s.wardId.startsWith('er-')).reduce((sum: number, s: ShiftRecord) => sum + (s.wardId === 'er-referral' ? 24 : 12), 0);
-    const wardHours = myShifts.filter((s: ShiftRecord) => !s.wardId.startsWith('er-')).reduce((sum: number, s: ShiftRecord) => sum + 24, 0);
+    const erHours = myShifts.filter((s: ShiftRecord) => s.wardId.startsWith('er-')).reduce((sum: number, s: ShiftRecord) => sum + 12, 0);
+    const wardHours = myShifts.filter((s: ShiftRecord) => !s.wardId.startsWith('er-')).reduce((sum: number, s: ShiftRecord) => {
+        const ward = staffing.wardMap.get(s.wardId);
+        if (ward?.requirements?.shiftWeight !== undefined) return sum + ward.requirements.shiftWeight;
+        const duration = ward?.requirements?.shiftDuration;
+        return sum + (duration === '6h' ? 6 : duration === '12h' ? 12 : 24);
+    }, 0);
     const totalHours = erHours + wardHours;
     const erPercent = totalHours > 0 ? (erHours / totalHours) * 100 : 0;
 
@@ -596,7 +592,7 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
                             <h2 className="text-2xl font-bold text-slate-900">{doctor.name}</h2>
                             <div className="flex flex-wrap items-center gap-3 mt-2">
                                 <span className="px-3 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase rounded-full">ID: {doctor.id}</span>
-                                <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-bold uppercase rounded-full">Role: Resident</span>
+                                <span className={`px-3 py-1 text-[10px] font-bold uppercase rounded-full ${(doctor.role === 'admin' || doctor.id === 'root') ? 'bg-indigo-600 text-white' : 'bg-blue-600 text-white'}`}>Role: {(doctor.role === 'admin' || doctor.id === 'root') ? 'Admin' : 'Resident'}</span>
                                 <span className="px-3 py-1 bg-amber-50 text-amber-600 text-[10px] font-bold uppercase rounded-full border border-amber-100">{totalHours} Weighted Hours</span>
                             </div>
                         </div>
@@ -614,12 +610,12 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
                         </div>
                     )}
                 </div>
-                {isSelf && user.id !== 'root' && (
+                {isSelf && (
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 w-full md:w-auto">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Update Security Key</label>
                         <div className="flex gap-2">
                             <input type="password" placeholder="New Key" value={newPass} onChange={e => setNewPass(e.target.value)} className="text-xs p-2 rounded-lg border border-slate-200 flex-1" />
-                            <button onClick={() => { staffing.updateDoctor({ ...doctor, password: newPass }); setNewPass(''); alert('Security Key Updated.'); }} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700"><Key className="w-4 h-4" /></button>
+                            <button onClick={() => { if (!newPass.trim()) return; staffing.updateDoctor({ ...doctor, password: newPass }); setNewPass(''); alert('Security Key Updated.'); }} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700"><Key className="w-4 h-4" /></button>
                         </div>
                     </div>
                 )}
@@ -646,7 +642,7 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
                                                 const isER = shift.wardId.startsWith('er-');
                                                 return (
                                                     <div key={shift.id} className={`p-1 rounded text-[7px] font-bold uppercase leading-tight ${isER ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-blue-600 text-white'}`}>
-                                                        <p className="truncate">{isER ? (shift.wardId === 'er-referral' ? 'REFERRAL' : 'ER CALL') : staffing.wardMap.get(shift.wardId)?.name}</p>
+                                                        <p className="truncate">{isER ? (shift.wardId === 'referral' ? 'REFERRAL' : 'ER CALL') : staffing.wardMap.get(shift.wardId)?.name}</p>
                                                         <p className="opacity-80">{isER ? getSlotName(shift.slotIndex, shift.wardId) : `Slot ${shift.slotIndex + 1}`}</p>
                                                     </div>
                                                 );
@@ -680,7 +676,7 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
     );
 });
 
-const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void }) => {
+const DashboardView = React.memo(({ staffing, user, onNavigate, onNavigateToSettings }: { staffing: any, user: AuthUser, onNavigate: (id: string) => void, onNavigateToSettings: () => void }) => {
     const myAssignment = staffing.assignments.filter((a: any) => a.doctorIds.includes(user.id)).sort((a: any, b: any) => b.period.localeCompare(a.period))[0];
     const isAdmin = user.role === 'admin';
     const currentMonth = new Date().toISOString().slice(0, 7);
@@ -697,7 +693,20 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
 
     return (
         <div className="space-y-8">
-            <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden"><div className="relative z-10"><h2 className="text-2xl font-bold">Hospital Overview</h2><p className="text-blue-100 mt-2 text-sm max-w-lg">{user.role === 'admin' ? "Full Control Mode." : myAssignment ? `Assigned to ${staffing.wardMap.get(myAssignment.wardId)?.name} for ${myAssignment.period}.` : "No active rotation."}</p></div><Hospital className="absolute right-[-20px] bottom-[-20px] w-64 h-64 text-white/10 rotate-12" /></div>
+            <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
+                <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h2 className="text-2xl font-bold">Hospital Overview</h2>
+                        <p className="text-blue-100 mt-2 text-sm max-w-lg">{user.role === 'admin' ? "Full Control Mode." : myAssignment ? `Assigned to ${staffing.wardMap.get(myAssignment.wardId)?.name} for ${myAssignment.period}.` : "No active rotation."}</p>
+                    </div>
+                    {user.role === 'admin' && (
+                        <button onClick={onNavigateToSettings} className="bg-white/20 hover:bg-white/30 text-white font-bold py-2.5 px-6 rounded-xl backdrop-blur-sm transition-all flex items-center gap-2 text-sm shadow-lg border border-white/10">
+                            <Settings className="w-4 h-4" /> Master Control Panel
+                        </button>
+                    )}
+                </div>
+                <Hospital className="absolute right-[-20px] bottom-[-20px] w-64 h-64 text-white/10 rotate-12 pointer-events-none" />
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><StatCard label="Total Staff" value={staffing.doctors.length} icon={<Users className="w-5 h-5 text-blue-600" />} /><StatCard label="Monthly Wards" value={staffing.wards.length} icon={<Hospital className="w-5 h-5 text-blue-600" />} /><StatCard label="Total Rotations" value={staffing.assignments.length} icon={<Archive className="w-5 h-5 text-blue-600" />} /><StatCard label="Archives" value={new Set(staffing.assignments.map((a: any) => a.period)).size} icon={<Calendar className="w-5 h-5 text-blue-600" />} /></div>
 
@@ -714,7 +723,7 @@ const DashboardView = React.memo(({ staffing, user, onNavigate }: { staffing: an
                                         {isER ? <Activity className="w-4 h-4 text-amber-500" /> : <Hospital className="w-4 h-4 text-blue-500" />}
                                     </div>
                                     <div>
-                                        <p className="text-sm font-bold text-slate-800 line-clamp-1">{isER ? (s.wardId === 'er-referral' ? 'REFERRAL' : s.wardId.replace('er-', '').toUpperCase()) : staffing.wardMap.get(s.wardId)?.name}</p>
+                                        <p className="text-sm font-bold text-slate-800 line-clamp-1">{isER ? s.wardId.replace('er-', '').toUpperCase() : staffing.wardMap.get(s.wardId)?.name}</p>
                                         <p className="text-[10px] font-bold uppercase text-slate-400 tracking-widest mt-1">{isER ? 'ER Call' : `Slot ${s.slotIndex + 1}`}</p>
                                     </div>
                                 </div>
@@ -820,10 +829,26 @@ const DoctorsView = React.memo(({ staffing, user, onNavigate }: { staffing: any,
                             ) : (
                                 <tr key={d.id} className="hover:bg-slate-50/50 group">
                                     <td className="px-6 py-4 text-[10px] font-mono text-slate-400 uppercase">{d.id}</td>
-                                    <td className="px-6 py-4 font-semibold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => onNavigate(d.id)}>{d.name}</td>
+                                    <td className="px-6 py-4 font-semibold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors flex items-center gap-2" onClick={() => onNavigate(d.id)}>
+                                        {d.name}
+                                        {d.role === 'admin' && <Shield className="w-3 h-3 text-indigo-500" title="Administrator" />}
+                                    </td>
                                     <td className="px-6 py-4 text-xs"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${d.gender === 'Male' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-pink-50 text-pink-600 border-pink-100'}`}>{d.gender}</span></td>
                                     {user.role === 'admin' && (
                                         <td className="px-6 py-4 text-right flex justify-end gap-2">
+                                            <button 
+                                                className={`p-1 opacity-0 group-hover:opacity-100 transition-opacity ${d.role === 'admin' ? 'text-indigo-600' : 'text-slate-400 hover:text-indigo-600'}`} 
+                                                onClick={() => {
+                                                    if (d.id === user.id) { alert("You cannot change your own role."); return; }
+                                                    const newRole = d.role === 'admin' ? 'resident' : 'admin';
+                                                    if (confirm(`Change ${d.name}'s role to ${newRole.toUpperCase()}?`)) {
+                                                        staffing.updateDoctor({ ...d, role: newRole });
+                                                    }
+                                                }}
+                                                title={d.role === 'admin' ? 'Revoke Admin' : 'Make Admin'}
+                                            >
+                                                <Shield className="w-4 h-4" />
+                                            </button>
                                             <button className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => { setEditingId(d.id); setNewDoctor(d); setShowAdd(false); }}><Edit2 className="w-4 h-4" /></button>
                                             <button className="p-1 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => { if (confirm('Delete?')) staffing.deleteDoctor(d.id); }}><Trash2 className="w-4 h-4" /></button>
                                         </td>
@@ -864,7 +889,8 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
                 requiredMale: Number(newWard.requirements?.requiredMale || 0),
                 requiredFemale: Number(newWard.requirements?.requiredFemale || 0),
                 staffPerShift: Number(newWard.requirements?.staffPerShift || 1) as 1 | 2,
-                shiftDuration: newWard.requirements?.shiftDuration || '12h'
+                shiftDuration: newWard.requirements?.shiftDuration || '12h',
+                shiftWeight: newWard.requirements?.shiftWeight
             }
         };
         if (editingId) staffing.updateWard(payload); else staffing.addWard(payload);
@@ -918,11 +944,12 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
                                 <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Female</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg" value={newWard.requirements?.requiredFemale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredFemale: parseInt(e.target.value) } }))} /></div>
                             </div>
                         )}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-slate-100">
                             <div><label className="text-[10px] uppercase font-bold text-slate-400">Hierarchy</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.parentWardId || ''} onChange={e => setNewWard(prev => ({ ...prev, parentWardId: e.target.value || undefined }))}><option value="">Main Unit (Stand-alone)</option>{staffing.wards.filter((w: Ward) => w.id !== editingId).map((w: Ward) => (<option key={w.id} value={w.id}>Subordinate to {w.name}</option>))}</select></div>
                             <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1 | 2 } }))}><option value={1}>1 Physician Per Shift</option><option value={2}>2 Physicians Per Shift</option></select></div>
                             <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div>
-                            <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 mt-auto h-[42px]">
+                            <div><label className="text-[10px] uppercase font-bold text-slate-400">Custom Weight (Hrs)</label><input type="number" min="0" placeholder="Optional" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={newWard.requirements?.shiftWeight || ''} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftWeight: e.target.value ? parseInt(e.target.value) : undefined } }))} /></div>
+                            <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 mt-auto h-[42px] md:col-span-4">
                                 <input type="checkbox" id="hideWardAdd" className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" checked={newWard.hiddenFromCalendar || false} onChange={e => setNewWard(prev => ({ ...prev, hiddenFromCalendar: e.target.checked }))} />
                                 <label htmlFor="hideWardAdd" className="text-[10px] uppercase font-bold text-slate-600 cursor-pointer">Hide from Calendar</label>
                             </div>
@@ -955,11 +982,12 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
                                                     <div><label className="text-[10px] uppercase font-bold text-slate-400">Required Female</label><input type="number" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.requiredFemale} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, requiredFemale: parseInt(e.target.value) } }))} /></div>
                                                 </div>
                                             )}
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-blue-100/50">
+                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-blue-100/50">
                                                 <div><label className="text-[10px] uppercase font-bold text-slate-400">Hierarchy</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.parentWardId || ''} onChange={e => setNewWard(prev => ({ ...prev, parentWardId: e.target.value || undefined }))}><option value="">Main Unit (Stand-alone)</option>{staffing.wards.filter((sw: Ward) => sw.id !== editingId).map((sw: Ward) => (<option key={sw.id} value={sw.id}>Subordinate to {sw.name}</option>))}</select></div>
                                                 <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Coverage</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.staffPerShift} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, staffPerShift: parseInt(e.target.value) as 1 | 2 } }))}><option value={1}>1 Physician Per Shift</option><option value={2}>2 Physicians Per Shift</option></select></div>
                                                 <div><label className="text-[10px] uppercase font-bold text-slate-400">Shift Duration</label><select className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.shiftDuration} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftDuration: e.target.value as any } }))}><option value="6h">6 Hours</option><option value="12h">12 Hours</option><option value="24h">24 Hours</option></select></div>
-                                                <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200 shadow-sm mt-auto h-[42px]">
+                                                <div><label className="text-[10px] uppercase font-bold text-slate-400">Custom Weight (Hrs)</label><input type="number" min="0" placeholder="Optional" className="w-full text-sm p-2 bg-white border border-slate-200 rounded-lg shadow-sm" value={newWard.requirements?.shiftWeight || ''} onChange={e => setNewWard(prev => ({ ...prev, requirements: { ...prev.requirements!, shiftWeight: e.target.value ? parseInt(e.target.value) : undefined } }))} /></div>
+                                                <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200 shadow-sm mt-auto h-[42px] md:col-span-4">
                                                     <input type="checkbox" id={`hideWard-${w.id}`} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" checked={newWard.hiddenFromCalendar || false} onChange={e => setNewWard(prev => ({ ...prev, hiddenFromCalendar: e.target.checked }))} />
                                                     <label htmlFor={`hideWard-${w.id}`} className="text-[10px] uppercase font-bold text-slate-600 cursor-pointer">Hide from Calendar</label>
                                                 </div>
@@ -1007,7 +1035,7 @@ const WardsView = React.memo(({ staffing, user, onNavigate }: { staffing: any, u
 
 const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelect, onNavigate }: { staffing: any, user: AuthUser, selectedPeriod: string | null, onSelect: (m: string | null) => void, onNavigate: (id: string) => void }) => {
     const isAdmin = user.role === 'admin';
-    const periods = useMemo(() => [...new Set(staffing.assignments.map((a: Assignment) => a.period))].sort((a, b) => b.localeCompare(a)), [staffing.assignments]);
+    const periods = useMemo(() => [...new Set(staffing.assignments.map((a: Assignment) => a.period))].sort((a, b) => (b as string).localeCompare(a as string)), [staffing.assignments]);
     const [viewMode, setViewMode] = useState<'dispatch' | 'ward' | 'er'>('dispatch');
 
     const handleExportExcel = (type: 'ward' | 'er') => {
@@ -1018,7 +1046,7 @@ const MonthlyArchiveView = React.memo(({ staffing, user, selectedPeriod, onSelec
         shifts.sort((a: any, b: any) => a.day - b.day).forEach((s: any) => {
             grid.push({
                 Day: s.day,
-                Unit: s.wardId.startsWith('er-') ? (s.wardId === 'er-referral' ? 'REFERRAL' : s.wardId.replace('er-', '').toUpperCase()) : (staffing.wardMap.get(s.wardId)?.name || s.wardId),
+                Unit: s.wardId.startsWith('er-') ? (s.wardId === 'referral' ? 'REFERRAL' : s.wardId.replace('er-', '').toUpperCase()) : (staffing.wardMap.get(s.wardId)?.name || s.wardId),
                 Personnel: staffing.doctorMap.get(s.doctorId)?.name || 'Unknown',
                 Role: s.wardId.startsWith('er-') ? 'ER Call' : 'Ward Duty'
             });
@@ -1257,25 +1285,29 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
             .map((d: Doctor) => {
                 const assignment = periodAssignments.find((a: any) => a.doctorIds.includes(d.id));
                 const isExcluded = assignment && excludedWardIds.includes(assignment.wardId);
-                
+
                 // Calculate breakdown for transparency
                 const doctorShifts = periodShifts.filter((s: any) => s.doctorId === d.id);
                 const wardHours = doctorShifts
-                    .filter((s: any) => !s.wardId.startsWith('er-'))
+                    .filter((s: any) => !s.wardId.startsWith('er-') && s.wardId !== 'referral')
                     .reduce((total: number, s: any) => {
                         const ward = staffing.wardMap.get(s.wardId);
+                        if (ward?.requirements?.shiftWeight !== undefined) return total + ward.requirements.shiftWeight;
                         const duration = ward?.requirements?.shiftDuration;
                         return total + (duration === '6h' ? 6 : duration === '12h' ? 12 : 24);
                     }, 0);
-                
+
                 const erHours = doctorShifts
-                    .filter((s: any) => s.wardId.startsWith('er-'))
+                    .filter((s: any) => s.wardId.startsWith('er-') && s.wardId !== 'referral')
                     .reduce((total: number, s: any) => {
-                        if (s.wardId.includes('referral')) return total + 24;
                         if (s.wardId.includes('men') || s.wardId.includes('women')) return total + 6;
                         if (s.wardId.includes('pediatric')) return total + 8;
                         return total + 12;
                     }, 0);
+
+                const refHours = doctorShifts
+                    .filter((s: any) => s.wardId === 'referral')
+                    .reduce((total: number, s: any) => total + 24, 0);
 
                 return {
                     ...d,
@@ -1283,7 +1315,8 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                     isExcluded,
                     wardHours,
                     erHours,
-                    totalHours: wardHours + erHours
+                    refHours,
+                    totalHours: wardHours + erHours + refHours
                 };
             })
             .sort((a: any, b: any) => {
@@ -1324,18 +1357,18 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
 
         // 3. Conflicts
         const fatigueRisks: { shiftId: string; msg: string }[] = [];
-        const SLOT_START = [8, 14, 20, 26]; 
-        const SLOT_END   = [14, 20, 26, 32];
-        
+        const SLOT_START = [8, 14, 20, 26];
+        const SLOT_END = [14, 20, 26, 32];
+
         staffing.doctors.forEach((doc: Doctor) => {
             if (doc.id === 'root') return;
             const docShifts = periodShifts.filter((s: ShiftRecord) => s.doctorId === doc.id).sort((a: any, b: any) => a.day - b.day || (a.slotIndex ?? 0) - (b.slotIndex ?? 0));
-            
+
             for (let i = 0; i < docShifts.length; i++) {
                 const s1 = docShifts[i];
                 if (i < docShifts.length - 1) {
                     const s2 = docShifts[i + 1];
-                    
+
                     let start1 = (s1.day - 1) * 24 + (SLOT_START[s1.slotIndex ?? 0] ?? 8);
                     let end1 = (s1.day - 1) * 24 + (SLOT_END[s1.slotIndex ?? 0] ?? 24);
                     if (!s1.wardId.startsWith('er-') && s1.slotIndex === undefined) {
@@ -1345,12 +1378,12 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                     }
 
                     let start2 = (s2.day - 1) * 24 + (SLOT_START[s2.slotIndex ?? 0] ?? 8);
-                    
+
                     const gap = start2 - end1;
                     if (gap < 12) {
-                        fatigueRisks.push({ 
-                            shiftId: s1.id, 
-                            msg: `${doc.name}: ${gap < 0 ? 'Overlap' : 'Fatigue (' + gap + 'h gap)'} Day ${s1.day}` 
+                        fatigueRisks.push({
+                            shiftId: s1.id,
+                            msg: `${doc.name}: ${gap < 0 ? 'Overlap' : 'Fatigue (' + gap + 'h gap)'} Day ${s1.day}`
                         });
                     }
                 }
@@ -1441,7 +1474,7 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                         <tr className="bg-white border-b border-slate-100">
                                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Physician</th>
                                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Primary Unit</th>
-                                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Workload (Ward/ER)</th>
+                                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Workload (Ward/ER/Ref)</th>
                                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Status</th>
                                         </tr>
                                     </thead>
@@ -1471,6 +1504,12 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                                                     <div className={`h-full bg-indigo-500`} style={{ width: `${Math.min((d.erHours / 80) * 100, 100)}%` }} />
                                                                 </div>
                                                                 <span className="text-[10px] font-bold text-slate-400">{d.erHours}h</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                                    <div className={`h-full bg-amber-500`} style={{ width: `${Math.min((d.refHours / 48) * 100, 100)}%` }} />
+                                                                </div>
+                                                                <span className="text-[10px] font-bold text-slate-400">{d.refHours}h</span>
                                                             </div>
                                                         </div>
                                                         <div className="flex flex-col items-end">
@@ -1568,7 +1607,7 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                                         </div>
                                         <p className="text-[10px] text-slate-500 leading-relaxed italic">{check.detail}</p>
                                         {check.actionId && (
-                                            <button 
+                                            <button
                                                 onClick={() => staffing.resolveFatigueConflict(targetPeriod, check.actionId)}
                                                 className="mt-3 px-3 py-1.5 bg-blue-600 text-white text-[9px] font-bold uppercase tracking-wider rounded-lg hover:bg-blue-500 transition-all flex items-center gap-2 shadow-lg shadow-blue-600/20"
                                             >
@@ -1602,6 +1641,471 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                     </div>
                 </div>
             )}
+        </div>
+    );
+});
+
+const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
+    const [selectedDocId, setSelectedDocId] = useState<string>('');
+    const [microPeriod, setMicroPeriod] = useState<string>(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`);
+    const [ruleType, setRuleType] = useState<'max_er_shifts' | 'forbidden_days' | 'ward_restriction'>('forbidden_days');
+    const [ruleValue, setRuleValue] = useState<string>('');
+
+    const selectedDoc = staffing.doctors.find((d: any) => d.id === selectedDocId);
+    const docShifts = staffing.shifts.filter((s: any) => s.doctorId === selectedDocId && s.period === microPeriod);
+
+    const defaultSlots = { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+    const currentSlots = staffing.erConfig?.slots || defaultSlots;
+
+    const handleUpdateSlots = (category: 'referral' | 'men' | 'women' | 'pediatric', slotIdx: number, val: number) => {
+        if (val < 0) return;
+        const newSlots = { ...currentSlots, [category]: [...currentSlots[category]] };
+        newSlots[category][slotIdx] = val;
+        staffing.updateERConfig({ ...staffing.erConfig, slots: newSlots });
+    };
+
+    const handleExport = () => {
+        const dataStr = JSON.stringify({
+            doctors: staffing.doctors,
+            wards: staffing.wards,
+            assignments: staffing.assignments,
+            shifts: staffing.shifts,
+            logs: staffing.logs,
+            config: staffing.erConfig
+        }, null, 2);
+        const blob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `wardstaffer_backup_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const data = JSON.parse(event.target?.result as string);
+                if (confirm('Are you sure you want to import this data? This will overwrite or merge with current data.')) {
+                    await staffing.importData(data);
+                    if (data.config) staffing.updateERConfig(data.config);
+                    alert('Data imported successfully. The app may need to be refreshed to reflect all changes.');
+                }
+            } catch (err) {
+                alert('Invalid JSON file format.');
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    const handleClearERConfig = () => {
+        if (confirm('Clear global ER configuration (Men/Women/Pediatric mappings)?')) {
+            staffing.updateERConfig({ men: [], women: [], pediatric: [] });
+            alert('ER Config cleared.');
+        }
+    };
+
+    const handleAddRule = () => {
+        if (!selectedDoc || !ruleValue) return;
+        let finalValue: any = ruleValue;
+        if (ruleType === 'max_er_shifts') finalValue = parseInt(ruleValue, 10);
+        if (ruleType === 'forbidden_days') finalValue = ruleValue.split(',').map(d => parseInt(d.trim(), 10)).filter(d => !isNaN(d));
+
+        const newRule = { id: Math.random().toString(36).substr(2, 9), type: ruleType, value: finalValue };
+        const updatedDoc = { ...selectedDoc, rules: [...(selectedDoc.rules || []), newRule] };
+        staffing.updateDoctor(updatedDoc);
+        setRuleValue('');
+    };
+
+    const handleRemoveRule = (ruleId: string) => {
+        if (!selectedDoc) return;
+        const updatedDoc = { ...selectedDoc, rules: selectedDoc.rules?.filter((r: any) => r.id !== ruleId) };
+        staffing.updateDoctor(updatedDoc);
+    };
+
+    const handleRemoveShift = async (shiftId: string) => {
+        if (!confirm('Are you sure you want to forcibly remove this shift?')) return;
+        const newShifts = staffing.shifts.filter((s: any) => s.id !== shiftId);
+
+        try {
+            await fetch('/api/shifts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newShifts.filter((s: any) => s.period === microPeriod))
+            });
+            // Update local state using importData or reload
+            alert('Shift removed. Please refresh the page or rely on background sync to see changes system-wide.');
+        } catch (e) { alert('Failed to remove shift'); }
+    };
+
+    return (
+        <div className="space-y-8 pb-20">
+            <div className="bg-slate-900 rounded-[32px] p-8 text-white shadow-2xl relative overflow-hidden group">
+                <Settings className="absolute right-[-20px] top-[-20px] w-48 h-48 text-white/5 rotate-12 group-hover:scale-110 transition-transform duration-700" />
+                <div className="relative z-10">
+                    <h2 className="text-2xl font-bold mb-2">Master Control Panel</h2>
+                    <p className="text-slate-400 text-sm max-w-lg">Global administration, database management, and system-wide configurations. Handle with extreme caution.</p>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                    <div>
+                        <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6">
+                            <Database className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">System Backup & Restore</h3>
+                        <p className="text-sm text-slate-500 mb-6">Export a full JSON snapshot of all clinicians, wards, schedules, and history logs. You can restore this file later.</p>
+                    </div>
+                    <div className="flex gap-4">
+                        <button onClick={handleExport} className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20">
+                            <Download className="w-4 h-4" /> Export DB
+                        </button>
+                        <label className="flex-1 flex items-center justify-center gap-2 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-colors cursor-pointer border border-slate-200">
+                            <UploadCloud className="w-4 h-4" /> Import DB
+                            <input type="file" accept=".json" className="hidden" onChange={handleImport} />
+                        </label>
+                    </div>
+                </div>
+
+                <div className="bg-white p-8 rounded-3xl border border-red-100 shadow-sm flex flex-col justify-between relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-full -z-10" />
+                    <div>
+                        <div className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mb-6">
+                            <AlertOctagon className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">Danger Zone</h3>
+                        <p className="text-sm text-slate-500 mb-6">Irreversible system modifications. Wiping configurations will disrupt all active operational rules.</p>
+                    </div>
+                    <div className="space-y-3">
+                        <button onClick={handleClearERConfig} className="w-full flex items-center justify-center gap-2 bg-white text-red-600 border border-red-200 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-red-50 hover:border-red-300 transition-colors">
+                            <Trash2 className="w-4 h-4" /> Purge Global ER Config
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* ER Capacity Configuration */}
+            <div className="bg-white p-8 rounded-3xl border border-amber-100 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-50 rounded-bl-full -z-10" />
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-6">
+                    <Activity className="w-5 h-5 text-amber-500" /> ER Capacity Configuration
+                </h3>
+                <p className="text-sm text-slate-500 mb-6">Adjust the number of clinicians required for each specific ER shift and Referral Call.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">Referral Call</h4>
+                        {currentSlots.referral.map((val: number, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase">24-Hour Duty</span>
+                                <input type="number" min="0" value={val} onChange={(e) => handleUpdateSlots('referral', idx, parseInt(e.target.value) || 0)} className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
+                            </div>
+                        ))}
+                    </div>
+                    <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">ER - Men</h4>
+                        {currentSlots.men.map((val: number, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase">Slot {idx + 1}</span>
+                                <input type="number" min="0" value={val} onChange={(e) => handleUpdateSlots('men', idx, parseInt(e.target.value) || 0)} className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
+                            </div>
+                        ))}
+                    </div>
+                    <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">ER - Women</h4>
+                        {currentSlots.women.map((val: number, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase">Slot {idx + 1}</span>
+                                <input type="number" min="0" value={val} onChange={(e) => handleUpdateSlots('women', idx, parseInt(e.target.value) || 0)} className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
+                            </div>
+                        ))}
+                    </div>
+                    <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">ER - Pediatric</h4>
+                        {currentSlots.pediatric.map((val: number, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase">Slot {idx + 1}</span>
+                                <input type="number" min="0" value={val} onChange={(e) => handleUpdateSlots('pediatric', idx, parseInt(e.target.value) || 0)} className="w-16 bg-white border border-slate-200 rounded p-1 text-xs text-center font-bold" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-6">
+                    <Activity className="w-5 h-5 text-blue-600" /> Database Statistics
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                        <p className="text-2xl font-black text-slate-800">{staffing.doctors.length}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Clinicians</p>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                        <p className="text-2xl font-black text-slate-800">{staffing.wards.length}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Units</p>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                        <p className="text-2xl font-black text-slate-800">{staffing.assignments.length}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Dispatches</p>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                        <p className="text-2xl font-black text-slate-800">{staffing.shifts.length}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Shifts</p>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                        <p className="text-2xl font-black text-slate-800">{staffing.logs.length}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Audit Logs</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Clinician Micromanagement Section */}
+            <div className="bg-white p-8 rounded-3xl border border-indigo-100 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-bl-full -z-10" />
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-6">
+                    <UserPlus className="w-5 h-5 text-indigo-600" /> Clinician Micromanagement
+                </h3>
+                <p className="text-sm text-slate-500 mb-6">Select a clinician to edit custom operational rules or micromanage their direct schedule.</p>
+
+                <div className="flex gap-4 mb-8">
+                    <select value={selectedDocId} onChange={(e) => setSelectedDocId(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 p-3 font-semibold outline-none">
+                        <option value="">-- Select Clinician --</option>
+                        {staffing.doctors.filter((d: any) => d.id !== 'root').map((d: any) => (
+                            <option key={d.id} value={d.id}>{d.name} ({d.gender})</option>
+                        ))}
+                    </select>
+                </div>
+
+                {selectedDoc && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        {/* Custom Rules */}
+                        <div className="space-y-4">
+                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">Custom Constraint Rules</h4>
+                            <div className="flex flex-col gap-3">
+                                <select value={ruleType} onChange={(e) => setRuleType(e.target.value as any)} className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-700 outline-none">
+                                    <option value="forbidden_days">Forbidden Days (Comma-separated numbers)</option>
+                                    <option value="max_er_shifts">Max ER Shifts (Number)</option>
+                                    <option value="ward_restriction">Ward Restriction (Ward ID)</option>
+                                </select>
+                                <input type="text" placeholder="e.g. 5, 12, 18 or 4" value={ruleValue} onChange={(e) => setRuleValue(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm text-slate-700 outline-none focus:border-indigo-500" />
+                                <button onClick={handleAddRule} className="bg-indigo-600 text-white font-bold text-xs uppercase tracking-widest py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20">Add Rule</button>
+                            </div>
+
+                            <div className="mt-4 space-y-2">
+                                {(!selectedDoc.rules || selectedDoc.rules.length === 0) && <p className="text-xs text-slate-400 italic">No custom rules active.</p>}
+                                {selectedDoc.rules?.map((r: any) => (
+                                    <div key={r.id} className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                        <div>
+                                            <p className="text-xs font-bold text-slate-800 uppercase">{r.type.replace(/_/g, ' ')}</p>
+                                            <p className="text-[10px] text-slate-500 font-mono mt-0.5">{JSON.stringify(r.value)}</p>
+                                        </div>
+                                        <button onClick={() => handleRemoveRule(r.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Shift Micromanagement */}
+                        <div className="space-y-4">
+                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center justify-between">
+                                Direct Schedule Editing
+                                <input type="month" value={microPeriod} onChange={(e) => setMicroPeriod(e.target.value)} className="bg-slate-50 border border-slate-200 rounded p-1 text-[10px] outline-none" />
+                            </h4>
+                            <div className="max-h-64 overflow-y-auto space-y-2 pr-2">
+                                {docShifts.length === 0 && <p className="text-xs text-slate-400 italic">No shifts found for this period.</p>}
+                                {docShifts.sort((a: any, b: any) => a.day - b.day).map((s: any) => (
+                                    <div key={s.id} className="flex items-center justify-between bg-white border border-slate-200 p-3 rounded-xl shadow-sm hover:shadow-md transition-shadow group">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-lg bg-slate-100 flex flex-col items-center justify-center border border-slate-200">
+                                                <span className="text-[8px] font-bold text-slate-400 uppercase leading-none mb-0.5">Day</span>
+                                                <span className="text-xs font-black text-slate-800 leading-none">{s.day}</span>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-slate-800">{staffing.wardMap.get(s.wardId)?.name || s.wardId}</p>
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase">{getSlotName(s.slotIndex, s.wardId)}</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => handleRemoveShift(s.id)} className="opacity-0 group-hover:opacity-100 p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-all" title="Remove Shift">
+                                            <CircleX className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+});
+
+const ShiftExchangeView = React.memo(({ staffing }: { staffing: any }) => {
+    const [docAId, setDocAId] = useState<string>('');
+    const [docBId, setDocBId] = useState<string>('');
+    const [period, setPeriod] = useState<string>(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`);
+
+    const shiftsA = staffing.shifts.filter((s: any) => s.doctorId === docAId && s.period === period).sort((a: any, b: any) => a.day - b.day);
+    const shiftsB = staffing.shifts.filter((s: any) => s.doctorId === docBId && s.period === period).sort((a: any, b: any) => a.day - b.day);
+
+    const handleDragStart = (e: React.DragEvent, shiftId: string, sourceDocId: string) => {
+        e.dataTransfer.setData('shiftId', shiftId);
+        e.dataTransfer.setData('sourceDocId', sourceDocId);
+    };
+
+    const handleDropOnShift = async (e: React.DragEvent, targetShiftId: string, targetDocId: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const draggedShiftId = e.dataTransfer.getData('shiftId');
+        const sourceDocId = e.dataTransfer.getData('sourceDocId');
+
+        if (sourceDocId === targetDocId) return; // Same doctor, ignore
+        if (draggedShiftId === targetShiftId) return;
+
+        // Perform swap
+        await staffing.swapShiftDoctors(period, draggedShiftId, targetShiftId);
+        alert('Shifts swapped successfully. Awaiting sync.');
+    };
+
+    const handleDropOnContainer = async (e: React.DragEvent, targetDocId: string) => {
+        e.preventDefault();
+        const draggedShiftId = e.dataTransfer.getData('shiftId');
+        const sourceDocId = e.dataTransfer.getData('sourceDocId');
+
+        if (!draggedShiftId || !sourceDocId) return;
+        if (sourceDocId === targetDocId) return; // Same doctor
+
+        const shiftToMove = staffing.shifts.find((s: any) => s.id === draggedShiftId);
+        if (!shiftToMove) return;
+
+        // Verify conflict
+        const hasConflict = staffing.shifts.some((s: any) => s.doctorId === targetDocId && s.day === shiftToMove.day && s.period === period);
+        if (hasConflict) {
+            if (!confirm(`Warning: The target doctor already has a shift on Day ${shiftToMove.day}. Move anyway?`)) return;
+        }
+
+        const updatedShift = { ...shiftToMove, doctorId: targetDocId };
+
+        try {
+            await fetch('/api/shifts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify([updatedShift])
+            });
+            // Let the local state sync pick it up
+            alert('Shift moved successfully. Awaiting sync.');
+        } catch (err) {
+            alert('Failed to move shift.');
+        }
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+    };
+
+    return (
+        <div className="space-y-8 pb-20">
+            <div className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div>
+                    <h2 className="text-2xl font-bold text-slate-800 mb-2 flex items-center gap-2">
+                        <ArrowRightLeft className="w-6 h-6 text-emerald-500" /> Shift Exchange Desk
+                    </h2>
+                    <p className="text-sm text-slate-500">Drag and drop shifts between two clinicians to seamlessly swap or transfer ownership.</p>
+                </div>
+                <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className="bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl focus:ring-2 focus:ring-emerald-500 p-3 outline-none" />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Doctor A */}
+                <div
+                    className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-6 min-h-[500px] flex flex-col transition-colors hover:border-emerald-300"
+                    onDrop={(e) => handleDropOnContainer(e, docAId)}
+                    onDragOver={handleDragOver}
+                >
+                    <select value={docAId} onChange={(e) => setDocAId(e.target.value)} className="w-full bg-white border border-slate-200 text-slate-700 text-sm rounded-xl focus:ring-2 focus:ring-emerald-500 p-3 font-bold outline-none mb-6 shadow-sm">
+                        <option value="">-- Select First Clinician --</option>
+                        {staffing.doctors.filter((d: any) => d.id !== 'root').map((d: any) => (
+                            <option key={d.id} value={d.id}>{d.name} ({d.gender})</option>
+                        ))}
+                    </select>
+
+                    <div className="flex-1 space-y-3 overflow-y-auto pr-2">
+                        {!docAId && <p className="text-center text-slate-400 text-sm italic mt-10">Select a clinician above.</p>}
+                        {docAId && shiftsA.length === 0 && <p className="text-center text-slate-400 text-sm italic mt-10">No shifts assigned for this period. Drop shifts here to add.</p>}
+                        {shiftsA.map((s: any) => (
+                            <div
+                                key={s.id}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, s.id, docAId)}
+                                onDrop={(e) => handleDropOnShift(e, s.id, docAId)}
+                                onDragOver={handleDragOver}
+                                className="bg-white border border-slate-200 p-4 rounded-2xl cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow relative overflow-hidden"
+                            >
+                                <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-emerald-500" />
+                                <div className="flex items-center justify-between pl-2">
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex flex-col items-center justify-center">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">Day</span>
+                                            <span className="text-lg font-black text-slate-800 leading-none">{s.day}</span>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-800">{staffing.wardMap.get(s.wardId)?.name || s.wardId}</p>
+                                            <p className="text-xs text-emerald-600 font-bold uppercase tracking-widest">{getSlotName(s.slotIndex, s.wardId)}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Doctor B */}
+                <div
+                    className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-6 min-h-[500px] flex flex-col transition-colors hover:border-emerald-300"
+                    onDrop={(e) => handleDropOnContainer(e, docBId)}
+                    onDragOver={handleDragOver}
+                >
+                    <select value={docBId} onChange={(e) => setDocBId(e.target.value)} className="w-full bg-white border border-slate-200 text-slate-700 text-sm rounded-xl focus:ring-2 focus:ring-emerald-500 p-3 font-bold outline-none mb-6 shadow-sm">
+                        <option value="">-- Select Second Clinician --</option>
+                        {staffing.doctors.filter((d: any) => d.id !== 'root' && d.id !== docAId).map((d: any) => (
+                            <option key={d.id} value={d.id}>{d.name} ({d.gender})</option>
+                        ))}
+                    </select>
+
+                    <div className="flex-1 space-y-3 overflow-y-auto pr-2">
+                        {!docBId && <p className="text-center text-slate-400 text-sm italic mt-10">Select a clinician above.</p>}
+                        {docBId && shiftsB.length === 0 && <p className="text-center text-slate-400 text-sm italic mt-10">No shifts assigned for this period. Drop shifts here to add.</p>}
+                        {shiftsB.map((s: any) => (
+                            <div
+                                key={s.id}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, s.id, docBId)}
+                                onDrop={(e) => handleDropOnShift(e, s.id, docBId)}
+                                onDragOver={handleDragOver}
+                                className="bg-white border border-slate-200 p-4 rounded-2xl cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow relative overflow-hidden"
+                            >
+                                <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-indigo-500" />
+                                <div className="flex items-center justify-between pl-2">
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex flex-col items-center justify-center">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">Day</span>
+                                            <span className="text-lg font-black text-slate-800 leading-none">{s.day}</span>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-800">{staffing.wardMap.get(s.wardId)?.name || s.wardId}</p>
+                                            <p className="text-xs text-indigo-600 font-bold uppercase tracking-widest">{getSlotName(s.slotIndex, s.wardId)}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
         </div>
     );
 });

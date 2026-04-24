@@ -36,23 +36,30 @@ async function ensureTables() {
   const sql = getSql();
   // Execute all table creations in parallel
   await Promise.all([
-    sql(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, password TEXT, "previousWards" TEXT NOT NULL)`),
+    sql(`CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT NOT NULL, gender TEXT NOT NULL, password TEXT, role TEXT, "previousWards" TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS wards (id TEXT PRIMARY KEY, name TEXT NOT NULL, requirements TEXT NOT NULL, "parentWardId" TEXT)`),
     sql(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, period TEXT NOT NULL, "wardId" TEXT NOT NULL, "doctorIds" TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS shifts (id TEXT PRIMARY KEY, period TEXT NOT NULL, day INTEGER NOT NULL, "wardId" TEXT NOT NULL, "slotIndex" INTEGER NOT NULL, "doctorId" TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`),
     sql(`CREATE TABLE IF NOT EXISTS logs (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, action TEXT NOT NULL, details TEXT NOT NULL, period TEXT NOT NULL)`)
   ]);
-  // Migrations: Ensure newer columns exist in existing tables
+  // Migrations
   try { await sql(`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS password TEXT`); } catch(e){}
+  try { await sql(`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS role TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS period TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE wards ADD COLUMN IF NOT EXISTS "parentWardId" TEXT`); } catch(e){}
   try { await sql(`ALTER TABLE wards ADD COLUMN IF NOT EXISTS "hiddenFromCalendar" BOOLEAN`); } catch(e){}
   try { await sql(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); } catch(e){}
-  // Clean up legacy columns that might cause NOT NULL violations
   try { await sql(`ALTER TABLE assignments ALTER COLUMN "date" DROP NOT NULL`); } catch(e){}
   try { await sql(`ALTER TABLE assignments DROP COLUMN IF EXISTS "date"`); } catch(e){}
+  // Seed root admin if not exists
+  const rootHash = hashPassword('root');
+  await sql(`
+    INSERT INTO doctors (id, name, gender, password, role, "previousWards")
+    VALUES ('root', 'Root Admin', 'Male', $1, 'admin', '[]')
+    ON CONFLICT (id) DO NOTHING
+  `, [rootHash]);
 }
 
 let tablesReady = null;
@@ -78,14 +85,15 @@ async function getTablesReady() {
 async function upsertDoctor(d) {
     const sql = getSql();
     await sql(`
-        INSERT INTO doctors (id, name, gender, password, "previousWards") 
-        VALUES ($1, $2, $3, $4, $5) 
+        INSERT INTO doctors (id, name, gender, password, role, "previousWards") 
+        VALUES ($1, $2, $3, $4, $5, $6) 
         ON CONFLICT (id) DO UPDATE SET 
             name = EXCLUDED.name, 
             gender = EXCLUDED.gender, 
-            password = EXCLUDED.password,
+            password = COALESCE(EXCLUDED.password, doctors.password),
+            role = COALESCE(EXCLUDED.role, doctors.role),
             "previousWards" = EXCLUDED."previousWards"
-    `, [d.id, d.name, d.gender, d.password || null, JSON.stringify(d.previousWards)]);
+    `, [d.id, d.name, d.gender, d.password || null, d.role || null, JSON.stringify(d.previousWards || [])]);
 }
 
 async function upsertWard(w) {
@@ -143,10 +151,11 @@ app.get('/api/doctors', async (req, res) => {
 
 app.post('/api/doctors', async (req, res) => {
   await getTablesReady();
-  const { id, name, gender, password, previousWards } = req.body;
+  const { id, name, gender, password, previousWards, role } = req.body;
   const doc = { 
       id, name, gender, 
       password: hashPassword(password || '11111111'), 
+      role: role || 'resident',
       previousWards: previousWards || [] 
   };
   if (isUsingMock) {
@@ -161,20 +170,20 @@ app.post('/api/doctors', async (req, res) => {
 
 app.put('/api/doctors/:id', async (req, res) => {
   await getTablesReady();
-  const { name, gender, password, previousWards } = req.body;
+  const { name, gender, password, previousWards, role } = req.body;
   if (isUsingMock) {
     const idx = mockDb.doctors.findIndex(d => d.id === req.params.id);
     if (idx > -1) {
         const existing = mockDb.doctors[idx];
-        mockDb.doctors[idx] = { id: req.params.id, name, gender, password: password || existing.password, previousWards };
+        mockDb.doctors[idx] = { id: req.params.id, name, gender, password: password || existing.password, role: role || existing.role, previousWards };
     }
     return res.json({ success: true });
   }
   try {
-    // If password not provided in edit, we should keep existing. 
     await upsertDoctor({ 
         id: req.params.id, name, gender, 
         password: password ? hashPassword(password) : undefined, 
+        role: role || undefined,
         previousWards 
     });
     res.json({ success: true });
@@ -228,7 +237,9 @@ app.post('/api/login', async (req, res) => {
     }
 
     const { password: _, ...user } = doctor;
-    res.json({ ...user, role: doctor.id === 'root' ? 'admin' : 'resident' });
+    // Role: use DB role column, fallback to 'admin' for root ID
+    const role = doctor.id === 'root' ? 'admin' : (doctor.role || 'resident');
+    res.json({ ...user, role });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
