@@ -292,8 +292,18 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                 {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
                     const dayShifts = periodShifts.filter((s: ShiftRecord) => s.day === day);
-                    const dayShiftsCount = dayShifts.length;
+                    const erDayShifts = dayShifts.filter(s => s.wardId.startsWith('er-') || s.wardId === 'referral');
+                    const dayShiftsCount = dayShifts.filter(s => !s.wardId.startsWith('er-') && s.wardId !== 'referral').length;
                     const referralShift = dayShifts.find(s => s.wardId === 'referral');
+                    const erTeam = erDayShifts.length > 0 ? staffing.teams.find((t: Team) => t.memberIds.includes(erDayShifts[0].doctorId)) : null;
+                    const teamColorMap: Record<string, string> = {
+                        violet: 'bg-violet-100 text-violet-700 border-violet-200',
+                        emerald: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                        rose: 'bg-rose-100 text-rose-700 border-rose-200',
+                        amber: 'bg-amber-100 text-amber-700 border-amber-200',
+                        cyan: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+                        orange: 'bg-orange-100 text-orange-700 border-orange-200'
+                    };
 
                     return (
                         <div key={day} 
@@ -307,7 +317,14 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
                                 }
                             }}
                             className={`bg-white p-2 min-h-[90px] cursor-pointer hover:bg-blue-50 transition-all border-b border-r border-slate-100 group relative ${selectedDay === day ? 'ring-2 ring-blue-500 z-10' : ''} ${draggedTeamId && isAdmin ? 'ring-2 ring-dashed ring-indigo-400 bg-indigo-50/20' : ''}`}>
-                            <span className={`text-xs font-bold ${day === new Date().getDate() && viewDate.getMonth() === new Date().getMonth() ? 'w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center' : 'text-slate-700'}`}>{day}</span>
+                            <div className="flex justify-between items-start mb-1">
+                                <span className={`text-xs font-bold ${day === new Date().getDate() && viewDate.getMonth() === new Date().getMonth() ? 'w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center' : 'text-slate-700'}`}>{day}</span>
+                                {erTeam && (
+                                    <div className={`px-1.5 py-0.5 rounded-[4px] border text-[7px] font-black uppercase tracking-tighter ${teamColorMap[erTeam.color] || 'bg-slate-100 text-slate-600'}`}>
+                                        {erTeam.name}
+                                    </div>
+                                )}
+                            </div>
                             {dayShiftsCount > 0 && (
                                 <div className="mt-2 space-y-1">
                                     <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">{dayShiftsCount} Slots</span></div>
