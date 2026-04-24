@@ -345,7 +345,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
     const daysInMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
     const firstDayIdx = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1).getDay();
 
-    const erShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.wardId.startsWith('er-'));
+    const erShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'));
 
     const handleDropOnDay = async (day: number) => {
         if (!draggedShift || !isAdmin || draggedShift.day === day) return;
@@ -433,7 +433,7 @@ const ERCallsView = React.memo(({ staffing, user, onNavigate, archivePeriod }: {
                             {dayShifts.length > 0 && (
                                 <div className="mt-2 space-y-1">
                                     <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /><span className="text-[8px] font-bold text-slate-500 uppercase">{dayShifts.length} Active Slots</span></div>
-                                    <div className="flex gap-0.5">{dayShifts.map(s => <div key={s.id} className={`w-1 h-2 rounded-full ${s.wardId === 'er-pediatric' ? 'bg-green-400' : s.wardId === 'er-women' ? 'bg-pink-400' : 'bg-blue-400'}`} />)}</div>
+                                    <div className="flex gap-0.5">{dayShifts.map(s => <div key={s.id} className={`w-1 h-2 rounded-full ${s.wardId === 'er-pediatric' ? 'bg-green-400' : s.wardId === 'er-women' ? 'bg-pink-400' : s.wardId === 'referral' ? 'bg-indigo-400' : 'bg-blue-400'}`} />)}</div>
                                 </div>
                             )}
                         </div>
@@ -575,8 +575,16 @@ const ProfileView = React.memo(({ staffing, user, targetDoctorId }: { staffing: 
     const period = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
     const myShifts = staffing.shifts.filter((s: ShiftRecord) => s.period === period && s.doctorId === effectiveId);
 
-    const erHours = myShifts.filter((s: ShiftRecord) => s.wardId.startsWith('er-')).reduce((sum: number, s: ShiftRecord) => sum + 12, 0);
-    const wardHours = myShifts.filter((s: ShiftRecord) => !s.wardId.startsWith('er-')).reduce((sum: number, s: ShiftRecord) => {
+    const durations = staffing.erConfig?.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
+    const isERShift = (s: ShiftRecord) => s.wardId.startsWith('er-') || s.wardId === 'referral';
+    const erHours = myShifts.filter((s: ShiftRecord) => isERShift(s)).reduce((sum: number, s: ShiftRecord) => {
+        if (s.wardId === 'referral') return sum + (durations.referral ?? 24);
+        if (s.wardId === 'er-men') return sum + (durations.men ?? 6);
+        if (s.wardId === 'er-women') return sum + (durations.women ?? 6);
+        if (s.wardId === 'er-pediatric') return sum + (durations.pediatric ?? 8);
+        return sum + 12;
+    }, 0);
+    const wardHours = myShifts.filter((s: ShiftRecord) => !isERShift(s)).reduce((sum: number, s: ShiftRecord) => {
         const ward = staffing.wardMap.get(s.wardId);
         if (ward?.requirements?.shiftWeight !== undefined) return sum + ward.requirements.shiftWeight;
         const duration = ward?.requirements?.shiftDuration;
@@ -1293,10 +1301,14 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                 const assignment = periodAssignments.find((a: any) => a.doctorIds.includes(d.id));
                 const isExcluded = assignment && excludedWardIds.includes(assignment.wardId);
 
-                // Calculate breakdown for transparency
+                // Calculate breakdown using configured durations
+                const cfg = staffing.erConfig;
+                const dur = cfg?.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
+                const isERShift = (s: any) => s.wardId.startsWith('er-') || s.wardId === 'referral';
                 const doctorShifts = periodShifts.filter((s: any) => s.doctorId === d.id);
+
                 const wardHours = doctorShifts
-                    .filter((s: any) => !s.wardId.startsWith('er-') && s.wardId !== 'referral')
+                    .filter((s: any) => !isERShift(s))
                     .reduce((total: number, s: any) => {
                         const ward = staffing.wardMap.get(s.wardId);
                         if (ward?.requirements?.shiftWeight !== undefined) return total + ward.requirements.shiftWeight;
@@ -1305,16 +1317,17 @@ const EquityView = React.memo(({ staffing, onNavigate }: { staffing: any, onNavi
                     }, 0);
 
                 const erHours = doctorShifts
-                    .filter((s: any) => s.wardId.startsWith('er-') && s.wardId !== 'referral')
+                    .filter((s: any) => isERShift(s) && s.wardId !== 'referral')
                     .reduce((total: number, s: any) => {
-                        if (s.wardId.includes('men') || s.wardId.includes('women')) return total + 6;
-                        if (s.wardId.includes('pediatric')) return total + 8;
+                        if (s.wardId === 'er-men') return total + (dur.men ?? 6);
+                        if (s.wardId === 'er-women') return total + (dur.women ?? 6);
+                        if (s.wardId === 'er-pediatric') return total + (dur.pediatric ?? 8);
                         return total + 12;
                     }, 0);
 
                 const refHours = doctorShifts
                     .filter((s: any) => s.wardId === 'referral')
-                    .reduce((total: number, s: any) => total + 24, 0);
+                    .reduce((total: number) => total + (dur.referral ?? 24), 0);
 
                 return {
                     ...d,

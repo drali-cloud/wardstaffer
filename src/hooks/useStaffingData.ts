@@ -253,8 +253,19 @@ export function useStaffingData() {
                       // CRITICAL FALLBACK: If everyone is already working today, allow anyone
                       if (eligible.length === 0) eligible = combinedDoctorPool;
 
-                      // SORT BY LEAST SHIFTS: Pick the person with the lowest count to maintain perfect equality
-                      eligible.sort((a, b) => shiftCounts[a] - shiftCounts[b]);
+                      // SORT CRITERIA:
+                      //   1. Least shifts this month (primary — maintains equity)
+                      //   2. Female gender (tiebreaker — females are preferred to accumulate
+                      //      slightly more ward hours; male doctors will compensate via
+                      //      referral calls in the equity engine)
+                      eligible.sort((a, b) => {
+                          const countDiff = shiftCounts[a] - shiftCounts[b];
+                          if (countDiff !== 0) return countDiff;
+                          // Tiebreak: Female = 0, Male = 1 → females sort first
+                          const aScore = doctorMap.get(a)?.gender === 'Female' ? 0 : 1;
+                          const bScore = doctorMap.get(b)?.gender === 'Female' ? 0 : 1;
+                          return aScore - bScore;
+                      });
                       
                       const dId = eligible[0];
                       shiftCounts[dId]++;
@@ -296,8 +307,8 @@ export function useStaffingData() {
             ...prev, 
             shifts: prev.shifts.filter(s => {
                 if (s.period !== period) return true;
-                if (type === 'er') return !s.wardId.startsWith('er-');
-                if (type === 'ward') return s.wardId.startsWith('er-');
+                if (type === 'er') return !(s.wardId.startsWith('er-') || s.wardId === 'referral');
+                if (type === 'ward') return s.wardId.startsWith('er-') || s.wardId === 'referral';
                 return false; 
             })
         }));
@@ -515,7 +526,7 @@ export function useStaffingData() {
         }
 
         await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newERShifts) });
-        setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && s.wardId.startsWith('er-'))), ...newERShifts] }));
+        setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'))), ...newERShifts] }));
     } catch (e) { alert('ER calculation failed.'); } finally { setSyncing(false); }
   }, [data]);
 
@@ -694,7 +705,7 @@ export function useStaffingData() {
                 if (rich.hours - minHours <= balanceThreshold) break; // All remaining are close enough
 
                 const richER = currentShifts.filter(s =>
-                    s.period === period && s.doctorId === rich.id && s.wardId.startsWith('er-')
+                    s.period === period && s.doctorId === rich.id && (s.wardId.startsWith('er-') || s.wardId === 'referral')
                 );
                 if (richER.length === 0) continue;
 
@@ -704,11 +715,24 @@ export function useStaffingData() {
                     if (gap <= balanceThreshold) break; // inner loop can also stop early
 
                     const poorER = currentShifts.filter(s =>
-                        s.period === period && s.doctorId === poor.id && s.wardId.startsWith('er-')
+                        s.period === period && s.doctorId === poor.id && (s.wardId.startsWith('er-') || s.wardId === 'referral')
                     );
 
                     // A. MOVE: give one of rich's ER shifts to poor
-                    for (const s of richER) {
+                    // Strategy: if rich is Male, try referral first (24h = max impact),
+                    // acting as the primary male-to-male equalizer.
+                    const richERSorted = [...richER].sort((a, b) => {
+                        if (rich.gender === 'Male') {
+                            // Referral (24h) first for males → biggest impact equalizer
+                            const aRef = a.wardId === 'referral' ? 0 : 1;
+                            const bRef = b.wardId === 'referral' ? 0 : 1;
+                            if (aRef !== bRef) return aRef - bRef;
+                        }
+                        // Then by descending duration
+                        return getDuration(b) - getDuration(a);
+                    });
+
+                    for (const s of richERSorted) {
                         if (s.wardId === 'referral' && poor.gender !== 'Male') continue;
                         if (!canTakeShift(poor.id, s, currentShifts)) continue;
 
@@ -718,8 +742,11 @@ export function useStaffingData() {
                         if (newPoor > newRich) continue; // overshoot guard
 
                         const reduction = gap - (newRich - newPoor);
-                        if (reduction > bestReduction) {
-                            bestReduction = reduction;
+                        // Give a small bonus when referral is redistributed male→male
+                        // so it is always preferred over an equal-reduction ER move
+                        const referralBonus = (s.wardId === 'referral' && poor.gender === 'Male') ? 0.01 : 0;
+                        if (reduction + referralBonus > bestReduction) {
+                            bestReduction = reduction + referralBonus;
                             bestMove = { type: 'move', shiftId: s.id, toDocId: poor.id };
                         }
                     }
