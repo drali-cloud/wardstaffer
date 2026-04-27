@@ -213,7 +213,7 @@ const ShiftCalendarView = React.memo(({ staffing, onNavigate, archivePeriod }: {
     const handleExportRoster = () => {
         if (periodShifts.length === 0) { alert('Generate roster first.'); return; }
         const wb = XLSX.utils.book_new();
-        const days = [...new Set(periodShifts.map(s => s.day))].sort((a, b) => a - b);
+        const days = [...new Set(periodShifts.map(s => s.day))].sort((a, b) => (a as any) - (b as any));
         const grid: any[] = [];
         days.forEach(day => {
             const dayShifts = periodShifts.filter(s => s.day === day);
@@ -1325,7 +1325,7 @@ const HistoryLogView = React.memo(({ staffing }: { staffing: any }) => {
                                 </div>
                                 <div>
                                     <p className="text-sm font-bold text-slate-800">{log.details}</p>
-                                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Period: {log.period} أ¢â‚¬آ¢ {new Date(log.timestamp).toLocaleString()}</p>
+                                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Period: {log.period} • {new Date(log.timestamp).toLocaleString()}</p>
                                 </div>
                             </div>
                             <span className="px-3 py-1 bg-white border border-slate-200 text-[9px] font-black uppercase text-slate-500 rounded-lg">{log.action}</span>
@@ -1772,7 +1772,7 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
         const w = s.wardId === 'referral' ? 'Referral Call'
             : s.wardId.startsWith('er-') ? `ER ${s.wardId.replace('er-','').toUpperCase()}`
             : staffing.wardMap.get(s.wardId)?.name || s.wardId;
-        return `Day ${s.day} â€” ${w} ${getSlotName(s.slotIndex ?? 0, s.wardId)}`;
+        return `Day ${s.day} — ${w} ${getSlotName(s.slotIndex ?? 0, s.wardId)}`;
     };
 
     const analyzeConflict = (ex: ShiftExchange) => {
@@ -1787,9 +1787,9 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
         if (allPeriodShifts.some((s: ShiftRecord) => s.doctorId === ex.targetDoctorId && s.id !== ex.targetShiftId && s.day === reqS.day))
             conflicts.push(`${tgtDoc?.name} already has a shift on Day ${reqS.day}.`);
         if (reqS.wardId === 'referral' && tgtDoc?.gender !== 'Male')
-            conflicts.push(`Referral calls require male physicians â€” ${tgtDoc?.name} is ${tgtDoc?.gender}.`);
+            conflicts.push(`Referral calls require male physicians — ${tgtDoc?.name} is ${tgtDoc?.gender}.`);
         if (tgtS.wardId === 'referral' && reqDoc?.gender !== 'Male')
-            conflicts.push(`Referral calls require male physicians â€” ${reqDoc?.name} is ${reqDoc?.gender}.`);
+            conflicts.push(`Referral calls require male physicians — ${reqDoc?.name} is ${reqDoc?.gender}.`);
         return { conflicts, safe: conflicts.length === 0 };
     };
 
@@ -1863,7 +1863,7 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
                     <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-xs font-black text-slate-500">{requester?.name?.charAt(0)}</div>
                         <div>
-                            <p className="text-sm font-bold text-slate-800">{requester?.name} <span className="text-slate-400 font-normal">â†’</span> {target?.name}</p>
+                            <p className="text-sm font-bold text-slate-800">{requester?.name} <span className="text-slate-400 font-normal">→</span> {target?.name}</p>
                             <p className="text-[10px] text-slate-400">{new Date(ex.createdAt).toLocaleString()}</p>
                         </div>
                     </div>
@@ -1885,7 +1885,7 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
                         <p className="font-bold flex items-center gap-1 mb-1">
                             {analysis.safe ? <><CircleCheck className="w-3.5 h-3.5"/>No Conflicts</> : <><TriangleAlert className="w-3.5 h-3.5"/>Conflicts Detected</>}
                         </p>
-                        {analysis.conflicts.map((c, i) => <p key={i} className="font-medium">â€¢ {c}</p>)}
+                        {analysis.conflicts.map((c, i) => <p key={i} className="font-medium">• {c}</p>)}
                     </div>
                     {ex.message && <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs text-slate-600 italic">"{ex.message}"</div>}
                     {ex.adminNote && <div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Admin Note</p><p className="text-xs text-slate-600">"{ex.adminNote}"</p></div>}
@@ -1910,7 +1910,7 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
                     {/* Admin approve/reject */}
                     {showAdminActions && (
                         <div className="pt-2 border-t border-slate-100 space-y-3">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Both parties agreed â€” Final Decision</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Both parties agreed — Final Decision</p>
                             <textarea value={adminNote[ex.id] || ''} onChange={e => setAdminNote(p => ({ ...p, [ex.id]: e.target.value }))}
                                 placeholder="Optional admin note..." rows={2}
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700 resize-none" />
@@ -1986,14 +1986,14 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">My Shift to Give Away</label>
                             <select value={myShiftId} onChange={e => setMyShiftId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-medium text-slate-700">
-                                <option value="">â€” Select your shift â€”</option>
+                                <option value="">— Select your shift —</option>
                                 {myShifts.map((s: ShiftRecord) => <option key={s.id} value={s.id}>{getShiftLabel(s)}</option>)}
                             </select>
                         </div>
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Swap With Doctor</label>
                             <select value={targetDoctorId} onChange={e => { setTargetDoctorId(e.target.value); setTargetShiftId(''); }} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-medium text-slate-700">
-                                <option value="">â€” Select doctor â€”</option>
+                                <option value="">— Select doctor —</option>
                                 {staffing.doctors.filter((d: Doctor) => d.id !== myId && d.id !== 'root').map((d: Doctor) => <option key={d.id} value={d.id}>{d.name}</option>)}
                             </select>
                         </div>
@@ -2001,7 +2001,7 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
                             <div className="space-y-1">
                                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Their Shift I Want</label>
                                 <select value={targetShiftId} onChange={e => setTargetShiftId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-medium text-slate-700">
-                                    <option value="">â€” Select shift â€”</option>
+                                    <option value="">— Select shift —</option>
                                     {targetShifts.map((s: ShiftRecord) => <option key={s.id} value={s.id}>{getShiftLabel(s)}</option>)}
                                 </select>
                             </div>
@@ -2033,7 +2033,7 @@ const ShiftExchangeView = React.memo(({ staffing, user }: { staffing: any, user:
                 </div>
             )}
 
-            {/* Admin review queue â€” only target_accepted */}
+            {/* Admin review queue — only target_accepted */}
             {!loading && tab === 'admin' && isAdmin && (
                 <div className="space-y-4">
                     {adminQueue.length === 0
@@ -2126,7 +2126,7 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
             {/* ER Capacity Configuration */}
             <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm p-8">
                 <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-2 flex items-center gap-2"><Activity className="w-4 h-4 text-amber-500" /> ER Capacity Configuration</h3>
-                <p className="text-sm text-slate-500 mb-6">Configure every aspect of ER scheduling â€” slot counts, time windows, hour weights, fatigue gaps, and referral rules.</p>
+                <p className="text-sm text-slate-500 mb-6">Configure every aspect of ER scheduling — slot counts, time windows, hour weights, fatigue gaps, and referral rules.</p>
 
                 {/* Global ER Settings */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 p-4 bg-amber-50/40 rounded-2xl border border-amber-100">
@@ -2156,7 +2156,7 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
                         <p className="text-[9px] text-slate-400">Restrict daily referral calls to male physicians</p>
                         <button onClick={() => staffing.updateERConfig({ ...staffing.erConfig, referralMaleOnly: !referralMaleOnly })}
                             className={`w-full py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-colors border ${referralMaleOnly ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300'}`}>
-                            {referralMaleOnly ? 'âœ“ Male Only' : 'âœ— All Genders'}
+                            {referralMaleOnly ? '✓ Male Only' : '✗ All Genders'}
                         </button>
                     </div>
                 </div>
@@ -2172,7 +2172,7 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
                                 {cat !== 'referral' && (
                                     <div className="flex gap-1">
                                         <button onClick={() => handleAddSlot(cat)} className="w-5 h-5 rounded bg-green-100 text-green-600 font-bold text-xs hover:bg-green-200 transition-colors">+</button>
-                                        <button onClick={() => handleRemoveSlot(cat)} className="w-5 h-5 rounded bg-red-100 text-red-600 font-bold text-xs hover:bg-red-200 transition-colors">âˆ’</button>
+                                        <button onClick={() => handleRemoveSlot(cat)} className="w-5 h-5 rounded bg-red-100 text-red-600 font-bold text-xs hover:bg-red-200 transition-colors">−</button>
                                     </div>
                                 )}
                             </div>
@@ -2228,7 +2228,7 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
                     <div className="space-y-4">
                         <select value={selectedDocId} onChange={e => setSelectedDocId(e.target.value)}
                             className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-700">
-                            <option value="">â€” Select Doctor â€”</option>
+                            <option value="">— Select Doctor —</option>
                             {staffing.doctors.filter((d: Doctor) => d.id !== 'root').map((d: Doctor) =>
                                 <option key={d.id} value={d.id}>{d.name}</option>)}
                         </select>
@@ -2275,7 +2275,7 @@ const ControlPanelView = React.memo(({ staffing }: { staffing: any }) => {
             {selectedDocId && (
                 <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm p-8">
                     <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-blue-500" /> Shift Preview â€” {selectedDoc?.name}
+                        <Calendar className="w-4 h-4 text-blue-500" /> Shift Preview — {selectedDoc?.name}
                     </h3>
                     {docShifts.length === 0 ? (
                         <p className="text-slate-400 text-sm italic">No shifts assigned for {microPeriod}.</p>

@@ -70,6 +70,20 @@ export function useStaffingData() {
     } catch (e) { alert(`${errorMsg}: Connection error.`); } finally { setSyncing(false); }
   }, []);
 
+  const addLog = useCallback(async (action: AuditLog['action'], details: string, period: string) => {
+    const newLog: AuditLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      timestamp: new Date().toISOString(),
+      action,
+      details,
+      period
+    };
+    try {
+        await fetch('/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLog) });
+        setData(prev => ({ ...prev, logs: [newLog, ...prev.logs] }));
+    } catch (e) { console.error('Log failure:', e); }
+  }, []);
+
   const addDoctor = useCallback((doctor: Doctor) => {
     executeAction(() => fetch('/api/doctors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doctor) }), () => setData(prev => ({ ...prev, doctors: [...prev.doctors, doctor] })), 'Failed to register physician');
   }, [executeAction]);
@@ -184,26 +198,90 @@ export function useStaffingData() {
     } finally { setSyncing(false); }
   }, [data]);
 
+  const getDuration = useCallback((s: ShiftRecord) => {
+    const durations = erConfig.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
+    if (s.wardId === 'referral') return durations.referral ?? 24;
+    if (s.wardId === 'er-men') return durations.men ?? 6;
+    if (s.wardId === 'er-women') return durations.women ?? 6;
+    if (s.wardId === 'er-pediatric') return durations.pediatric ?? 8;
+    if (s.wardId.startsWith('er-')) return 12;
+    
+    const ward = data.wards.find(w => w.id === s.wardId);
+    if (ward?.requirements?.shiftWeight !== undefined) return ward.requirements.shiftWeight;
+    const duration = ward?.requirements?.shiftDuration;
+    if (duration === '6h') return 6;
+    if (duration === '12h') return 12;
+    return 24;
+  }, [data.wards, erConfig.durations]);
+
   const calculateTotalHours = useCallback((doctorId: string, period?: string, customShifts?: ShiftRecord[]) => {
     const shiftsToUse = customShifts || data.shifts;
-    const durations = erConfig.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
     return shiftsToUse
         .filter(s => s.doctorId === doctorId && (!period || s.period === period))
-        .reduce((total, s) => {
-            if (s.wardId === 'referral') return total + (durations.referral ?? 24);
-            if (s.wardId === 'er-men') return total + (durations.men ?? 6);
-            if (s.wardId === 'er-women') return total + (durations.women ?? 6);
-            if (s.wardId === 'er-pediatric') return total + (durations.pediatric ?? 8);
-            if (s.wardId.startsWith('er-')) return total + 12;
-            
-            const ward = data.wards.find(w => w.id === s.wardId);
-            if (ward?.requirements?.shiftWeight !== undefined) return total + ward.requirements.shiftWeight;
-            const duration = ward?.requirements?.shiftDuration;
-            if (duration === '6h') return total + 6;
-            if (duration === '12h') return total + 12;
-            return total + 24;
-        }, 0);
-  }, [data.shifts, data.wards, erConfig.durations]);
+        .reduce((total, s) => total + getDuration(s), 0);
+  }, [data.shifts, getDuration]);
+
+  const getShiftRange = useCallback((s: ShiftRecord) => {
+    const dayOffset = (s.day - 1) * 24;
+    let start = 8;
+    let end = 20;
+
+    if (s.wardId === 'referral') {
+      const duration = erConfig.durations?.referral ?? 24;
+      start = 8;
+      end = 8 + duration;
+    } else if (s.wardId === 'er-pediatric') {
+      const duration = erConfig.durations?.pediatric ?? 8;
+      start = 8 + (s.slotIndex ?? 0) * duration;
+      end = start + duration;
+    } else if (s.wardId.startsWith('er-')) {
+      const category = s.wardId === 'er-men' ? 'men' : 'women';
+      const duration = erConfig.durations?.[category] ?? 6;
+      start = 8 + (s.slotIndex ?? 0) * duration;
+      end = start + duration;
+    } else {
+      const ward = wardMap.get(s.wardId);
+      if (ward) {
+        const { staffPerShift, shiftDuration } = ward.requirements;
+        const durationHours = shiftDuration === '6h' ? 6 : shiftDuration === '12h' ? 12 : 24;
+        const timeSlotIdx = Math.floor((s.slotIndex ?? 0) / staffPerShift);
+        start = 8 + timeSlotIdx * durationHours;
+        end = start + durationHours;
+      }
+    }
+    return { start: dayOffset + start, end: dayOffset + end };
+  }, [erConfig.durations, wardMap]);
+
+  const checkConflict = useCallback((doctorId: string, shift: ShiftRecord, currentShifts: ShiftRecord[], period: string) => {
+    const doctorShifts = currentShifts.filter(s => s.period === period && s.doctorId === doctorId && s.id !== shift.id);
+    const targetRange = getShiftRange(shift);
+    const fatigueGap = erConfig.fatigueGap ?? 12;
+    const referralBufferDays = erConfig.referralBufferDays ?? 1;
+
+    // Referral buffer check
+    if (shift.wardId === 'referral') {
+        if (doctorShifts.some(s => Math.abs(s.day - shift.day) <= referralBufferDays)) return true;
+    } else {
+        if (doctorShifts.some(s => s.wardId === 'referral' && Math.abs(s.day - shift.day) <= referralBufferDays)) return true;
+    }
+
+    for (const s of doctorShifts) {
+      const range = getShiftRange(s);
+      
+      // Check for overlap
+      if (targetRange.start < range.end && range.start < targetRange.end) return true;
+
+      // Check for fatigue gap
+      const isERS1 = shift.wardId.startsWith('er-') || shift.wardId === 'referral';
+      const isERS2 = s.wardId.startsWith('er-') || s.wardId === 'referral';
+      
+      if (isERS1 || isERS2) {
+        const gap = Math.max(targetRange.start - range.end, range.start - targetRange.end);
+        if (gap < fatigueGap) return true;
+      }
+    }
+    return false;
+  }, [getShiftRange, erConfig.fatigueGap, erConfig.referralBufferDays]);
 
   const calculateDailyRoster = useCallback(async (period: string) => {
       setSyncing(true);
@@ -297,7 +375,117 @@ export function useStaffingData() {
               alert(`Roster generated for ${daysInMonth} days.`);
           }
       } catch (e) { alert('Roster calculation failed.'); } finally { setSyncing(false); }
-  }, [data.assignments, data.wards, wardMap]);
+  }, [data.assignments, data.wards, doctorMap]);
+
+  const calculateERCalls = useCallback(async (period: string, config: any) => {
+    setSyncing(true);
+    try {
+        const daysInMonth = new Date(parseInt(period.split('-')[0]), parseInt(period.split('-')[1]), 0).getDate();
+        const wardShifts = data.shifts.filter(s => s.period === period);
+        const newERShifts: ShiftRecord[] = [];
+        
+        const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
+        const durations = config.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
+        const referralMaleOnly = config.referralMaleOnly !== false;
+        
+        const categories = [
+            { id: 'referral', name: 'Daily Referral', slots: slots.referral, wards: [...config.men, ...config.women, ...config.pediatric], duration: durations.referral ?? 24, maleOnly: referralMaleOnly },
+            { id: 'er-men', name: 'Men', slots: slots.men, wards: config.men, duration: durations.men ?? 6 },
+            { id: 'er-women', name: 'Women', slots: slots.women, wards: config.women, duration: durations.women ?? 6 },
+            { id: 'er-pediatric', name: 'Pediatric', slots: slots.pediatric, wards: config.pediatric, duration: durations.pediatric ?? 8 }
+        ];
+
+        const erCallCount: Record<string, number> = {};
+        const referralCount: Record<string, number> = {};
+        const hoursMap: Record<string, number> = {};
+        
+        data.doctors.filter(d => d.id !== 'root').forEach(d => {
+            hoursMap[d.id]      = calculateTotalHours(d.id, period, wardShifts);
+            erCallCount[d.id]   = 0;
+            referralCount[d.id] = 0;
+        });
+
+        const ER_CALL_HARD_CAP = 11;
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            categories.forEach(cat => {
+                const pool = new Set<string>();
+                cat.wards.forEach(wId => {
+                    const assignment = data.assignments.find(a => a.period === period && a.wardId === wId);
+                    assignment?.doctorIds.forEach(dId => pool.add(dId));
+                });
+                
+                const poolArray = Array.from(pool);
+                if (poolArray.length === 0) return;
+
+                cat.slots.forEach((staffCount, slotIdx) => {
+                    for (let s = 0; s < staffCount; s++) {
+                        const tempShift: ShiftRecord = {
+                            id: 'temp',
+                            period, day, wardId: cat.id, slotIndex: slotIdx, doctorId: ''
+                        };
+
+                        const sortKey = (id: string) => {
+                            return hoursMap[id] ?? 0;
+                        };
+
+                        const underHardCap = (id: string) =>
+                            cat.id === 'referral' || (erCallCount[id] ?? 0) < ER_CALL_HARD_CAP;
+
+                        let eligible = poolArray
+                            .filter(candidate => {
+                                const doc = doctorMap.get(candidate);
+                                if (cat.maleOnly && doc?.gender !== 'Male') return false;
+                                if (!underHardCap(candidate)) return false;
+                                return !checkConflict(candidate, tempShift, [...wardShifts, ...newERShifts], period);
+                            })
+                            .sort((a, b) => sortKey(a) - sortKey(b));
+
+                        if (eligible.length === 0) {
+                            eligible = poolArray
+                                .filter(candidate => {
+                                    const doc = doctorMap.get(candidate);
+                                    if (cat.maleOnly && doc?.gender !== 'Male') return false;
+                                    if (!underHardCap(candidate)) return false;
+                                    
+                                    const doctorShifts = [...wardShifts, ...newERShifts].filter(x => x.period === period && x.doctorId === candidate);
+                                    if (doctorShifts.some(x => x.day === day)) return false;
+                                    
+                                    const referralBufferDays = erConfig.referralBufferDays ?? 1;
+                                    if (cat.id === 'referral') {
+                                        if (doctorShifts.some(x => Math.abs(x.day - day) <= referralBufferDays)) return false;
+                                    } else {
+                                        if (doctorShifts.some(x => x.wardId === 'referral' && Math.abs(x.day - day) <= referralBufferDays)) return false;
+                                    }
+                                    
+                                    return true;
+                                })
+                                .sort((a, b) => sortKey(a) - sortKey(b));
+                        }
+
+                        if (eligible.length > 0) {
+                            const dId = eligible[0];
+                            const finalizedShift = { ...tempShift, id: `er-${period}-${day}-${cat.id}-${slotIdx}-${s}`, doctorId: dId };
+                            newERShifts.push(finalizedShift);
+                            hoursMap[dId] += cat.duration;
+                            if (cat.id === 'referral') referralCount[dId] = (referralCount[dId] ?? 0) + 1;
+                            else erCallCount[dId] = (erCallCount[dId] ?? 0) + 1;
+                        }
+                    }
+                });
+            });
+        }
+
+        await fetch('/api/shifts', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ period, type: 'er' })
+        });
+        await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newERShifts) });
+
+        setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'))), ...newERShifts] }));
+    } catch (e: any) { alert(`ER calculation failed: ${e.message}`); } finally { setSyncing(false); }
+  }, [data, calculateTotalHours, doctorMap, checkConflict, erConfig.referralBufferDays]);
 
   const clearRosterByPeriod = useCallback(async (period: string, type: 'all' | 'er' | 'ward' = 'all') => {
     if (!confirm(`Are you sure you want to delete ${type === 'all' ? 'ALL' : type.toUpperCase()} shifts for ${period}?`)) return;
@@ -360,7 +548,6 @@ export function useStaffingData() {
         const newA1 = { ...a1, doctorIds: a1.doctorIds.map(id => id === docA ? docB : id) };
         const newA2 = { ...a2, doctorIds: a2.doctorIds.map(id => id === docB ? docA : id) };
 
-        // Deep Swap: Switch all associated shifts for this month
         const updatedShifts = data.shifts.map(s => {
             if (s.period !== period) return s;
             if (s.doctorId === docA) return { ...s, doctorId: docB };
@@ -384,9 +571,6 @@ export function useStaffingData() {
     } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
   }, [data.assignments, data.shifts]);
 
-  // One-way transfer: move docA from wardA → wardB without needing a swap partner.
-  // Removes docA from the source assignment, adds to the target assignment,
-  // and re-stamps all their ward shifts for this period to the target ward.
   const movePoolDoctor = useCallback(async (period: string, wardA: string, docA: string, wardB: string) => {
     if (wardA === wardB) return;
     setSyncing(true);
@@ -396,14 +580,11 @@ export function useStaffingData() {
         const dstAssignment = assignments.find(a => a.wardId === wardB);
         if (!srcAssignment) return;
 
-        // Remove doctor from source
         const newSrc = { ...srcAssignment, doctorIds: srcAssignment.doctorIds.filter(id => id !== docA) };
-        // Add doctor to destination (create if not exists)
         const newDst = dstAssignment
             ? { ...dstAssignment, doctorIds: [...dstAssignment.doctorIds, docA] }
             : { id: `${period}-${wardB}`, period, wardId: wardB, doctorIds: [docA] };
 
-        // Re-stamp all ward shifts for this doctor in this period to the target ward
         const updatedShifts = data.shifts.map(s => {
             if (s.period !== period || s.doctorId !== docA) return s;
             if (s.wardId === wardA) return { ...s, wardId: wardB };
@@ -459,341 +640,45 @@ export function useStaffingData() {
     } catch (e) { alert('Shift swap failed.'); } finally { setSyncing(false); }
   }, [data.shifts]);
 
-  const calculateERCalls = useCallback(async (period: string, config: any) => {
+  const swapERCalls = useCallback(async (period: string, shiftA: ShiftRecord, shiftB: ShiftRecord) => {
     setSyncing(true);
     try {
-        const daysInMonth = new Date(parseInt(period.split('-')[0]), parseInt(period.split('-')[1]), 0).getDate();
-        const wardShifts = data.shifts.filter(s => s.period === period);
-        const newERShifts: ShiftRecord[] = [];
+        const newS1 = { ...shiftA, doctorId: shiftB.doctorId };
+        const newS2 = { ...shiftB, doctorId: shiftA.doctorId };
         
-        const slots = config.slots || { referral: [1], men: [2, 4, 4, 2], women: [2, 4, 4, 2], pediatric: [1, 1, 1] };
-        const durations = config.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
-        const fatigueGap = config.fatigueGap ?? 12;
-        const referralMaleOnly = config.referralMaleOnly !== false;
-        const referralBufferDays = config.referralBufferDays ?? 1; // days free before/after referral
-        
-        const categories = [
-            { id: 'referral', name: 'Daily Referral', slots: slots.referral, wards: [...config.men, ...config.women, ...config.pediatric], duration: durations.referral ?? 24, maleOnly: referralMaleOnly },
-            { id: 'er-men', name: 'Men', slots: slots.men, wards: config.men, duration: durations.men ?? 6 },
-            { id: 'er-women', name: 'Women', slots: slots.women, wards: config.women, duration: durations.women ?? 6 },
-            { id: 'er-pediatric', name: 'Pediatric', slots: slots.pediatric, wards: config.pediatric, duration: durations.pediatric ?? 8 }
-        ];
+        const docAName = doctorMap.get(shiftA.doctorId)?.name || 'Unknown';
+        const docBName = doctorMap.get(shiftB.doctorId)?.name || 'Unknown';
+        const wardAName = wardMap.get(shiftA.wardId)?.name || shiftA.wardId;
+        const wardBName = wardMap.get(shiftB.wardId)?.name || shiftB.wardId;
 
-        // Track cumulative hours per doctor for the period, starting with ward shifts
-        // Root is excluded from all scheduling — it is a system admin account only
-        const hoursMap: Record<string, number> = {};
-        // Separate counters for referral and ER (non-referral) calls — used as primary sort keys
-        // so that a 24h referral block does NOT crowd a doctor out of the ER rotation.
-        const erCallCount: Record<string, number> = {};    // non-referral ER slots only
-        const referralCount: Record<string, number> = {};  // referral slots only
-        data.doctors.filter(d => d.id !== 'root').forEach(d => {
-            hoursMap[d.id]      = calculateTotalHours(d.id, period, wardShifts);
-            erCallCount[d.id]   = 0;
-            referralCount[d.id] = 0;
-        });
-
-        // Target: 6–10 ER calls per doctor. Hard ceiling prevents extreme overload.
-        const ER_CALL_SOFT_MAX = 10;
-        const ER_CALL_HARD_CAP = 11; // allow +1 overflow only if no other candidate exists
-
-        // --- Slot time boundaries (hours from day midnight) ---
-        // Slot 0: 08:00-14:00  Slot 1: 14:00-20:00
-        // Slot 2: 20:00-02:00  Slot 3: 02:00-08:00
-        const SLOT_START = [8, 14, 20, 26]; // 26 = 02:00 next-day
-        const SLOT_END   = [14, 20, 26, 32]; // 32 = 08:00 next-day
-
-        // Helper: get shift end hour, handling 24h referral slots
-        const getShiftEndHour = (shift: { wardId: string; slotIndex: number }): number => {
-            if (shift.wardId === 'referral') {
-                // 24h shift ends 24h after midnight of the day it started
-                return 24;
-            }
-            return SLOT_END[shift.slotIndex ?? 0] ?? 24;
-        };
-
-        // Helper: bidirectional ER cross-day rest check
-        // Returns true if candidate had a recent ER shift that would violate the fatigue gap
-        const hasERCrossDayConflict = (candidate: string, targetDay: number, targetSlotIdx: number): boolean => {
-            const targetStart = SLOT_START[targetSlotIdx] ?? 8;
-            
-            return newERShifts.some(prev => {
-                if (prev.doctorId !== candidate) return false;
-                const prevEnd = getShiftEndHour(prev);
-                
-                // Check conflict with yesterday's shift
-                if (prev.day === targetDay - 1) {
-                    const gap = (targetStart + 24) - prevEnd;
-                    if (gap < fatigueGap) return true;
-                }
-                
-                // Check conflict with today's shift ending too close to tomorrow's shift
-                if (prev.day === targetDay + 1) {
-                    const prevStart = SLOT_START[prev.slotIndex ?? 0] ?? 8;
-                    const gap = (prevStart + 24) - targetStart;
-                    if (gap < fatigueGap) return true;
-                }
-                
-                return false;
-            });
-        };
-
-        // Helper: bidirectional referral buffer conflict check
-        // A doctor cannot take an ER slot if they have a referral within referralBufferDays
-        // (in either direction), and cannot take a referral if they have any shift nearby
-        const hasReferralBufferConflict = (candidate: string, targetDay: number, targetIsReferral: boolean): boolean => {
-            const allShifts = [
-                ...wardShifts.filter(x => x.doctorId === candidate),
-                ...newERShifts.filter(x => x.doctorId === candidate)
-            ];
-            
-            if (targetIsReferral) {
-                // For referral assignment: no other shift (ward or ER) within buffer days
-                for (let offset = 1; offset <= referralBufferDays; offset++) {
-                    if (allShifts.some(x => x.day === targetDay - offset || x.day === targetDay + offset)) return true;
-                }
-            } else {
-                // For non-referral ER: cannot assign if doctor has a referral within buffer days
-                const referralShifts = allShifts.filter(x => x.wardId === 'referral');
-                for (const ref of referralShifts) {
-                    if (Math.abs(ref.day - targetDay) <= referralBufferDays) return true;
-                }
-            }
-            
-            return false;
-        };
-
-        for (let day = 1; day <= daysInMonth; day++) {
-            categories.forEach(cat => {
-                const pool = new Set<string>();
-                cat.wards.forEach(wId => {
-                    const assignment = data.assignments.find(a => a.period === period && a.wardId === wId);
-                    assignment?.doctorIds.forEach(dId => pool.add(dId));
-                });
-                
-                const poolArray = Array.from(pool);
-                if (poolArray.length === 0) return;
-
-                cat.slots.forEach((staffCount, slotIdx) => {
-                    for (let s = 0; s < staffCount; s++) {
-
-                        // Sort helper: for ER slots use erCallCount (not total hours) so referral's
-                        // 24h weight does NOT push doctors out of the ER rotation.
-                        // For referral slots use referralCount so the duty spreads across more males.
-                        const sortKey = (id: string) =>
-                            cat.id === 'referral' ? referralCount[id] ?? 0 : erCallCount[id] ?? 0;
-
-                        // Hard-cap filter: skip doctors at/above the hard cap for non-referral ER slots
-                        // unless there is absolutely no other choice (handled in Pass 3).
-                        const underHardCap = (id: string) =>
-                            cat.id === 'referral' || (erCallCount[id] ?? 0) < ER_CALL_HARD_CAP;
-
-                        // Pass 1: Strict (ward 12h rest + bidirectional ER cross-day 12h rest + referral buffer + hard cap)
-                        let eligible = poolArray
-                            .filter(candidate => {
-                                const doc = doctorMap.get(candidate);
-                                if (cat.maleOnly && doc?.gender !== 'Male') return false;
-                                if (!underHardCap(candidate)) return false;
-
-                                const hasWardShiftToday     = wardShifts.some(x => x.day === day     && x.doctorId === candidate);
-                                const hasWardShiftYesterday = wardShifts.some(x => x.day === day - 1 && x.doctorId === candidate);
-                                const hasWardShiftTomorrow  = wardShifts.some(x => x.day === day + 1 && x.doctorId === candidate);
-                                const hasOtherERToday       = newERShifts.some(x => x.day === day     && x.doctorId === candidate);
-
-                                // Ward-to-ER 12h rule (existing)
-                                const isNightCall = slotIdx >= 2;
-                                const yesterdayWardConflict = hasWardShiftYesterday && !isNightCall;
-                                const tomorrowWardConflict  = hasWardShiftTomorrow  && isNightCall;
-
-                                // Bidirectional ER cross-day conflict check
-                                const erCrossConflict = hasERCrossDayConflict(candidate, day, slotIdx);
-                                const refBufferConflict = hasReferralBufferConflict(candidate, day, cat.id === 'referral');
-
-                                return !hasWardShiftToday && !yesterdayWardConflict && !tomorrowWardConflict && !hasOtherERToday && !erCrossConflict && !refBufferConflict;
-                            })
-                            .sort((a, b) => sortKey(a) - sortKey(b));
-
-                        // Pass 2: Relaxed — keep ER cross-day rule but drop ward-rest rules
-                        if (eligible.length === 0) {
-                            eligible = poolArray
-                                .filter(candidate => {
-                                    const doc = doctorMap.get(candidate);
-                                    if (cat.maleOnly && doc?.gender !== 'Male') return false;
-                                    if (!underHardCap(candidate)) return false;
-
-                                    const hasWardShiftToday = wardShifts.some(x => x.day === day && x.doctorId === candidate);
-                                    const hasOtherERToday   = newERShifts.some(x => x.day === day && x.doctorId === candidate);
-                                    const erCrossConflict   = hasERCrossDayConflict(candidate, day, slotIdx);
-                                    const refBufferConflict = hasReferralBufferConflict(candidate, day, cat.id === 'referral');
-
-                                    return !hasWardShiftToday && !hasOtherERToday && !erCrossConflict && !refBufferConflict;
-                                })
-                                .sort((a, b) => sortKey(a) - sortKey(b));
-                        }
-
-                        // Pass 3: Last-resort — drop hard cap too; only same-day and referral buffer blocked
-                        if (eligible.length === 0) {
-                            eligible = poolArray
-                                .filter(candidate => {
-                                    const doc = doctorMap.get(candidate);
-                                    if (cat.maleOnly && doc?.gender !== 'Male') return false;
-                                    const sameDay = newERShifts.some(x => x.day === day && x.doctorId === candidate);
-                                    const refBufferConflict = hasReferralBufferConflict(candidate, day, cat.id === 'referral');
-                                    return !sameDay && !refBufferConflict;
-                                })
-                                .sort((a, b) => sortKey(a) - sortKey(b));
-                        }
-
-                        if (eligible.length > 0) {
-                            const dId = eligible[0];
-                            newERShifts.push({
-                                id: `er-${period}-${day}-${cat.id}-${slotIdx}-${s}`,
-                                period, day, wardId: cat.id, doctorId: dId, slotIndex: slotIdx
-                            });
-                            hoursMap[dId] += cat.duration;
-                            // Update per-type counters
-                            if (cat.id === 'referral') {
-                                referralCount[dId] = (referralCount[dId] ?? 0) + 1;
-                            } else {
-                                erCallCount[dId] = (erCallCount[dId] ?? 0) + 1;
-                            }
-                        }
-                    }
-                });
-            });
-        }
-
-        // Persist: wipe old ER + referral shifts for this period, then save the fresh set
-        const delResp = await fetch('/api/shifts', {
-            method: 'DELETE',
+        await fetch('/api/shifts', {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ period, type: 'er' })
-        });
-        if (!delResp.ok) throw new Error('Failed to clear old ER shifts from database');
-
-        const saveResp = await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newERShifts) });
-        if (!saveResp.ok) throw new Error('Failed to save ER shifts to database');
-
-        setData(prev => ({ ...prev, shifts: [...prev.shifts.filter(s => !(s.period === period && (s.wardId.startsWith('er-') || s.wardId === 'referral'))), ...newERShifts] }));
-    } catch (e: any) { alert(`ER calculation failed: ${e.message}`); } finally { setSyncing(false); }
-  }, [data]);
-
-  const importData = useCallback(async (newData: Partial<StaffingData>) => {
-    executeAction(() => fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newData) }), () => fetchData(), 'Data import failed');
-  }, [executeAction]);
-
-  const manualAssignDoctor = useCallback(async (doctorId: string, wardId: string, period: string) => {
-    setSyncing(true);
-    try {
-        const assignment = data.assignments.find(a => a.period === period && a.wardId === wardId);
-        const ward = data.wards.find(w => w.id === wardId);
-        let newAssignments = [...data.assignments];
-        let newWards = [...data.wards];
-        let updatedDoctorIds = assignment ? [...assignment.doctorIds] : [];
-        
-        if (!updatedDoctorIds.includes(doctorId)) {
-            updatedDoctorIds.push(doctorId);
-            // Auto-expand capacity if full
-            if (ward && updatedDoctorIds.length > ward.requirements.totalDoctors) {
-                const updatedWard = { ...ward, requirements: { ...ward.requirements, totalDoctors: updatedDoctorIds.length } };
-                newWards = newWards.map(w => w.id === wardId ? updatedWard : w);
-                await fetch(`/api/wards/${wardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedWard) });
-            }
-        }
-
-        if (assignment) {
-            newAssignments = newAssignments.map(a => a.id === assignment.id ? { ...a, doctorIds: updatedDoctorIds } : a);
-        } else {
-            newAssignments.push({ id: `${period}-${wardId}`, period, wardId, doctorIds: [doctorId] });
-        }
-
-        const updatedDocs = data.doctors.map(d => d.id === doctorId && !d.previousWards.includes(wardId) ? { ...d, previousWards: [...d.previousWards, wardId] } : d);
-
-        await fetch('/api/dispatch', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ assignments: newAssignments, doctors: updatedDocs.filter(d => d.id === doctorId) }) 
+            body: JSON.stringify([newS1, newS2])
         });
 
-        setData(prev => ({ ...prev, assignments: newAssignments, doctors: updatedDocs, wards: newWards }));
-    } catch (e) { alert('Manual assignment failed.'); } finally { setSyncing(false); }
-  }, [data]);
+        await addLog('swap_er', 
+            `Swapped ${docAName} (${wardAName} Day ${shiftA.day}) with ${docBName} (${wardBName} Day ${shiftB.day})`, 
+            period
+        );
+
+        setData(prev => ({
+            ...prev,
+            shifts: prev.shifts.map(s => s.id === shiftA.id ? newS1 : s.id === shiftB.id ? newS2 : s)
+        }));
+    } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
+  }, [doctorMap, wardMap, addLog]);
 
   const autoBalanceWorkload = useCallback(async (period: string, excludedWardIds: string[] = []) => {
     setSyncing(true);
     try {
         let currentShifts = [...data.shifts];
-        const SLOT_START = [8, 14, 20, 26]; 
-        const SLOT_END   = [14, 20, 26, 32];
-        const fatigueGap = erConfig.fatigueGap ?? 12;
         const balanceThreshold = erConfig.balanceThreshold ?? 12;
-        const referralBufferDays = erConfig.referralBufferDays ?? 1;
-
-        // Helper: get shift end hour, handling 24h referral slots
-        const getShiftEndHour = (s: ShiftRecord): number => {
-            if (s.wardId === 'referral') return 24;
-            return SLOT_END[s.slotIndex ?? 0] ?? 24;
-        };
 
         const canTakeShift = (doctorId: string, shift: ShiftRecord, shifts: ShiftRecord[]): boolean => {
-            const doctorShifts = shifts.filter(s => s.period === period && s.doctorId === doctorId && s.id !== shift.id);
-            const isNightER = (shift.slotIndex ?? 0) >= 2;
-            const isWardShift = !shift.wardId.startsWith('er-') && shift.wardId !== 'referral';
-            const shiftStart = SLOT_START[shift.slotIndex ?? 0] ?? 8;
-            const shiftEnd = shift.wardId === 'referral' ? 24 : (SLOT_END[shift.slotIndex ?? 0] ?? 24);
-
-            // Referral buffer: no shift at all within ±referralBufferDays of referral call
-            if (shift.wardId === 'referral') {
-                for (let offset = 1; offset <= referralBufferDays; offset++) {
-                    if (doctorShifts.some(s => s.day === shift.day - offset || s.day === shift.day + offset)) return false;
-                }
-            }
-            // Also block taking any shift if doctor already has a referral within buffer window
-            const hasNearbyReferral = doctorShifts.some(s =>
-                s.wardId === 'referral' &&
-                Math.abs(s.day - shift.day) <= referralBufferDays
-            );
-            if (hasNearbyReferral) return false;
-
-            for (const s of doctorShifts) {
-                if (s.day === shift.day) return false;
-
-                const sEnd = getShiftEndHour(s);
-
-                // Cross-day ER rest rule (configurable fatigue gap) - bidirectional
-                if (s.wardId.startsWith('er-') || s.wardId === 'referral') {
-                    // Check if yesterday's shift ends too close to today's start
-                    if (s.day === shift.day - 1) {
-                        if ((shiftStart + 24) - sEnd < fatigueGap) return false;
-                    }
-                    // Check if today's shift ends too close to tomorrow's shift
-                    if (s.day === shift.day + 1) {
-                        const sStart = SLOT_START[s.slotIndex ?? 0] ?? 8;
-                        if ((sStart + 24) - shiftStart < fatigueGap) return false;
-                    }
-                }
-
-                // Ward-to-ER fatigue rules
-                if (isWardShift) {
-                    if (s.wardId.startsWith('er-') && s.day === shift.day - 1 && (s.slotIndex ?? 0) >= 2) return false;
-                } else {
-                    if (!s.wardId.startsWith('er-') && s.day === shift.day - 1 && !isNightER) return false;
-                    if (!s.wardId.startsWith('er-') && s.day === shift.day + 1 && isNightER) return false;
-                }
-            }
-            return true;
+            return !checkConflict(doctorId, shift, shifts, period);
         };
 
-        // ─── Duration helper (uses configurable erConfig.durations) ────────────
-        const getDuration = (s: ShiftRecord): number => {
-            const durations = erConfig.durations || { referral: 24, men: 6, women: 6, pediatric: 8 };
-            if (s.wardId === 'referral')     return durations.referral ?? 24;
-            if (s.wardId === 'er-men')       return durations.men ?? 6;
-            if (s.wardId === 'er-women')     return durations.women ?? 6;
-            if (s.wardId === 'er-pediatric') return durations.pediatric ?? 8;
-            return 12;
-        };
-
-        // --- PHASE 1: Intra-Ward Balance (Ward Shifts Only) ---
         const periodAssignments = data.assignments.filter(a => a.period === period);
         for (const assignment of periodAssignments) {
             let wardChanges = true;
@@ -824,19 +709,6 @@ export function useStaffingData() {
                 }
             }
         }
-
-        // ─── PHASE 2: Global ER + Referral Equity — Best-Move Exhaustive Search ──
-        //
-        // Algorithm per iteration:
-        //   1. Sort all active doctors by total hours (desc).
-        //   2. For every (rich, poor) pair where gap > balanceThreshold:
-        //        a. MOVE  – try giving any of rich's ER shifts to poor.
-        //        b. SWAP  – try exchanging any two ER shifts of differing duration.
-        //   3. Apply the single move that achieves the GREATEST gap reduction.
-        //   4. Repeat until no move improves equity or threshold is reached.
-        //
-        // ER soft cap (10 calls) prevents loading a doctor with 12-13 ER calls
-        // when redistributing. Referral moves are exempt from this cap.
 
         const ER_BALANCE_SOFT_MAX = 10;
         const countERCalls = (docId: string, shifts: ShiftRecord[]) =>
@@ -874,7 +746,7 @@ export function useStaffingData() {
 
             for (let i = 0; i < leaderboard.length; i++) {
                 const rich = leaderboard[i];
-                if (rich.hours - minHours <= balanceThreshold) break; // All remaining are close enough
+                if (rich.hours - minHours <= balanceThreshold) break;
 
                 const richER = currentShifts.filter(s =>
                     s.period === period && s.doctorId === rich.id && (s.wardId.startsWith('er-') || s.wardId === 'referral')
@@ -884,57 +756,37 @@ export function useStaffingData() {
                 for (let j = leaderboard.length - 1; j > i; j--) {
                     const poor = leaderboard[j];
                     const gap = rich.hours - poor.hours;
-                    if (gap <= balanceThreshold) break; // inner loop can also stop early
+                    if (gap <= balanceThreshold) break;
 
                     const poorER = currentShifts.filter(s =>
                         s.period === period && s.doctorId === poor.id && (s.wardId.startsWith('er-') || s.wardId === 'referral')
                     );
 
-                    // A. MOVE: give one of rich's ER shifts to poor
-                    // Strategy: if rich is Male, try referral first (24h = max impact),
-                    // acting as the primary male-to-male equalizer.
-                    const richERSorted = [...richER].sort((a, b) => {
-                        if (rich.gender === 'Male') {
-                            // Referral (24h) first for males → biggest impact equalizer
-                            const aRef = a.wardId === 'referral' ? 0 : 1;
-                            const bRef = b.wardId === 'referral' ? 0 : 1;
-                            if (aRef !== bRef) return aRef - bRef;
-                        }
-                        // Then by descending duration
-                        return getDuration(b) - getDuration(a);
-                    });
-
-                    for (const s of richERSorted) {
+                    for (const s of richER) {
                         if (s.wardId === 'referral' && poor.gender !== 'Male') continue;
                         if (!canTakeShift(poor.id, s, currentShifts)) continue;
-                        // Don't push poor above soft ER cap (referral is exempt — it helps hours equity)
                         if (s.wardId !== 'referral' && poor.erCalls >= ER_BALANCE_SOFT_MAX) continue;
 
                         const dur = getDuration(s);
                         const newRich = rich.hours - dur;
                         const newPoor = poor.hours + dur;
-                        if (newPoor > newRich) continue; // overshoot guard
+                        if (newPoor > newRich) continue;
 
                         const reduction = gap - (newRich - newPoor);
-                        // Give a small bonus when referral is redistributed male→male
-                        // so it is always preferred over an equal-reduction ER move
-                        const referralBonus = (s.wardId === 'referral' && poor.gender === 'Male') ? 0.01 : 0;
-                        if (reduction + referralBonus > bestReduction) {
-                            bestReduction = reduction + referralBonus;
+                        if (reduction > bestReduction) {
+                            bestReduction = reduction;
                             bestMove = { type: 'move', shiftId: s.id, toDocId: poor.id };
                         }
                     }
 
-                    // B. SWAP: exchange two ER shifts of different duration
                     for (const richShift of richER) {
                         const richDur = getDuration(richShift);
                         for (const poorShift of poorER) {
                             const poorDur = getDuration(poorShift);
-                            if (richDur <= poorDur) continue; // swap must move hours from rich → poor
+                            if (richDur <= poorDur) continue;
 
                             if (richShift.wardId === 'referral' && poor.gender !== 'Male') continue;
                             if (poorShift.wardId === 'referral' && rich.gender !== 'Male') continue;
-                            // Swapping non-referral ER shift onto poor who's already at soft cap
                             if (richShift.wardId !== 'referral' && poor.erCalls >= ER_BALANCE_SOFT_MAX) continue;
 
                             const tempShifts = currentShifts.filter(s => s.id !== richShift.id && s.id !== poorShift.id);
@@ -943,7 +795,7 @@ export function useStaffingData() {
 
                             const newRich = rich.hours - richDur + poorDur;
                             const newPoor = poor.hours + richDur - poorDur;
-                            if (newPoor > newRich) continue; // overshoot guard
+                            if (newPoor > newRich) continue;
 
                             const reduction = gap - (newRich - newPoor);
                             if (reduction > bestReduction) {
@@ -972,14 +824,6 @@ export function useStaffingData() {
             }
         }
 
-        // Final stats
-        const finalHours = data.doctors
-            .filter(d => d.id !== 'root')
-            .map(d => calculateTotalHours(d.id, period, currentShifts));
-        const finalMax = Math.max(...finalHours);
-        const finalMin = Math.min(...finalHours);
-        const finalGap = finalMax - finalMin;
-
         await fetch('/api/shifts', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
@@ -987,17 +831,15 @@ export function useStaffingData() {
         });
 
         setData(prev => ({ ...prev, shifts: currentShifts }));
-        await addLog('auto_balance', `Equity engine: ${iterations} iterations. Final gap: ${finalGap}h (max ${finalMax}h / min ${finalMin}h).`, period);
-        alert(`Workload balanced in ${iterations} iterations.\nMax: ${finalMax}h | Min: ${finalMin}h | Gap: ${finalGap}h`);
+        const finalHours = data.doctors.filter(d => d.id !== 'root').map(d => calculateTotalHours(d.id, period, currentShifts));
+        const finalMax = Math.max(...finalHours);
+        const finalMin = Math.min(...finalHours);
+        const finalGap = finalMax - finalMin;
+        await addLog('auto_balance', `Equity engine: ${iterations} iterations. Final gap: ${finalGap}h.`, period);
+        alert(`Workload balanced.\nGap: ${finalGap}h`);
         return true;
-    } catch (e) {
-        console.error('Auto-balance failed:', e);
-        return false;
-    } finally {
-        setSyncing(false);
-    }
-  }, [data, calculateTotalHours]);
-
+    } catch (e) { return false; } finally { setSyncing(false); }
+  }, [data, calculateTotalHours, checkConflict, getDuration, erConfig.balanceThreshold, addLog]);
 
   const batchUpdateHistory = useCallback(async (period: string, action: 'add' | 'remove') => {
     setSyncing(true);
@@ -1042,21 +884,6 @@ export function useStaffingData() {
     } catch (e) { alert('History update failed.'); } finally { setSyncing(false); }
   }, [data]);
 
-
-  const addLog = useCallback(async (action: AuditLog['action'], details: string, period: string) => {
-    const newLog: AuditLog = {
-      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      timestamp: new Date().toISOString(),
-      action,
-      details,
-      period
-    };
-    try {
-        await fetch('/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLog) });
-        setData(prev => ({ ...prev, logs: [newLog, ...prev.logs] }));
-    } catch (e) { console.error('Log failure:', e); }
-  }, []);
-
   const optimizeReferralsForMales = useCallback(async (period: string) => {
     setSyncing(true);
     try {
@@ -1085,35 +912,6 @@ export function useStaffingData() {
     } catch (e) { alert('Referral optimization failed.'); } finally { setSyncing(false); }
   }, [data, calculateTotalHours, addLog]);
 
-  const swapERCalls = useCallback(async (period: string, shiftA: ShiftRecord, shiftB: ShiftRecord) => {
-    setSyncing(true);
-    try {
-        const newS1 = { ...shiftA, doctorId: shiftB.doctorId };
-        const newS2 = { ...shiftB, doctorId: shiftA.doctorId };
-        
-        const docAName = doctorMap.get(shiftA.doctorId)?.name || 'Unknown';
-        const docBName = doctorMap.get(shiftB.doctorId)?.name || 'Unknown';
-        const wardAName = wardMap.get(shiftA.wardId)?.name || shiftA.wardId;
-        const wardBName = wardMap.get(shiftB.wardId)?.name || shiftB.wardId;
-
-        await fetch('/api/shifts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify([newS1, newS2])
-        });
-
-        await addLog('swap_er', 
-            `Swapped ${docAName} (${wardAName} Day ${shiftA.day}) with ${docBName} (${wardBName} Day ${shiftB.day})`, 
-            period
-        );
-
-        setData(prev => ({
-            ...prev,
-            shifts: prev.shifts.map(s => s.id === shiftA.id ? newS1 : s.id === shiftB.id ? newS2 : s)
-        }));
-    } catch (e) { alert('Swap failed.'); } finally { setSyncing(false); }
-  }, [data.shifts, doctorMap, wardMap, addLog]);
-
   const resolveFatigueConflict = useCallback(async (period: string, shiftId: string) => {
     setSyncing(true);
     try {
@@ -1129,65 +927,21 @@ export function useStaffingData() {
             s.day !== shiftA.day
         );
 
-        const SLOT_START = [8, 14, 20, 26]; 
-        const SLOT_END   = [14, 20, 26, 32];
-
-        // Helper: get shift end hour, handling 24h referral slots
-        const getShiftEndHour = (s: ShiftRecord): number => {
-            if (s.wardId === 'referral') return 24;
-            return SLOT_END[s.slotIndex ?? 0] ?? 24;
-        };
-
-        const checkSafe12h = (dId: string, targetShift: ShiftRecord, excludeId: string) => {
-            const targetStart = (targetShift.day - 1) * 24 + (SLOT_START[targetShift.slotIndex ?? 0] ?? 8);
-            let targetEnd: number;
-            
-            if (targetShift.wardId === 'referral') {
-                targetEnd = targetStart + 24;
-            } else if (!targetShift.wardId.startsWith('er-')) {
-                const ward = wardMap.get(targetShift.wardId);
-                const duration = ward?.requirements?.shiftDuration === '6h' ? 6 : ward?.requirements?.shiftDuration === '12h' ? 12 : 24;
-                targetEnd = targetStart + duration;
-            } else {
-                targetEnd = (targetShift.day - 1) * 24 + getShiftEndHour(targetShift);
-            }
-
-            return !currentShifts.some(s => {
-                if (s.period !== period || s.doctorId !== dId || s.id === excludeId) return false;
-                
-                const sStart = (s.day - 1) * 24 + (SLOT_START[s.slotIndex ?? 0] ?? 8);
-                let sEnd: number;
-                
-                if (s.wardId === 'referral') {
-                    sEnd = sStart + 24;
-                } else if (!s.wardId.startsWith('er-')) {
-                    const ward = wardMap.get(s.wardId);
-                    const duration = ward?.requirements?.shiftDuration === '6h' ? 6 : ward?.requirements?.shiftDuration === '12h' ? 12 : 24;
-                    sEnd = sStart + duration;
-                } else {
-                    sEnd = (s.day - 1) * 24 + getShiftEndHour(s);
-                }
-
-                const gap = Math.max(targetStart - sEnd, sStart - targetEnd);
-                return gap < 12;
-            });
-        };
-
         for (const shiftB of candidates) {
             const docB = shiftB.doctorId;
-            if (checkSafe12h(docA, shiftB, shiftA.id) && checkSafe12h(docB, shiftA, shiftB.id)) {
+            if (!checkConflict(docA, shiftB, currentShifts, period) && !checkConflict(docB, shiftA, currentShifts, period)) {
                 const newS1 = { ...shiftA, doctorId: docB };
                 const newS2 = { ...shiftB, doctorId: docA };
                 await fetch('/api/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([newS1, newS2]) });
                 setData(prev => ({ ...prev, shifts: prev.shifts.map(s => s.id === shiftA.id ? newS1 : s.id === shiftB.id ? newS2 : s) }));
                 await addLog('auto_resolve', `Resolved fatigue for ${doctorMap.get(docA)?.name} by swapping with ${doctorMap.get(docB)?.name}`, period);
-                alert('Fatigue resolved with 12h safety margin.');
+                alert('Fatigue resolved with safety margin.');
                 return;
             }
         }
-        alert('No 12h safe swap candidates found.');
+        alert('No safe swap candidates found.');
     } catch (e) { console.error(e); } finally { setSyncing(false); }
-  }, [data.shifts, doctorMap, wardMap, addLog]);
+  }, [data.shifts, doctorMap, checkConflict, addLog]);
 
-  return { ...data, wards: allWards, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, movePoolDoctor, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict };
+  return { ...data, wards: allWards, loading, syncing, erConfig, updateERConfig, addDoctor, deleteDoctor, updateDoctor, addWard, deleteWard, updateWard, generateMonthlyDispatch, calculateDailyRoster, calculateERCalls, clearRosterByPeriod, deleteDispatchByPeriod, updateAssignment, swapPoolDoctors, movePoolDoctor, swapShiftDoctors, swapERCalls, optimizeReferralsForMales, importData, doctorMap, wardMap, calculateTotalHours, manualAssignDoctor, autoBalanceWorkload, batchUpdateHistory, resolveFatigueConflict, getDuration, getShiftRange, checkConflict };
 }
