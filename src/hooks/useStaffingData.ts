@@ -496,6 +496,72 @@ export function useStaffingData() {
         const ER_CALL_SOFT_MAX = 10;
         const ER_CALL_HARD_CAP = 11; // allow +1 overflow only if no other candidate exists
 
+        // --- Slot time boundaries (hours from day midnight) ---
+        // Slot 0: 08:00-14:00  Slot 1: 14:00-20:00
+        // Slot 2: 20:00-02:00  Slot 3: 02:00-08:00
+        const SLOT_START = [8, 14, 20, 26]; // 26 = 02:00 next-day
+        const SLOT_END   = [14, 20, 26, 32]; // 32 = 08:00 next-day
+
+        // Helper: get shift end hour, handling 24h referral slots
+        const getShiftEndHour = (shift: { wardId: string; slotIndex: number }): number => {
+            if (shift.wardId === 'referral') {
+                // 24h shift ends 24h after midnight of the day it started
+                return 24;
+            }
+            return SLOT_END[shift.slotIndex ?? 0] ?? 24;
+        };
+
+        // Helper: bidirectional ER cross-day rest check
+        // Returns true if candidate had a recent ER shift that would violate the fatigue gap
+        const hasERCrossDayConflict = (candidate: string, targetDay: number, targetSlotIdx: number): boolean => {
+            const targetStart = SLOT_START[targetSlotIdx] ?? 8;
+            
+            return newERShifts.some(prev => {
+                if (prev.doctorId !== candidate) return false;
+                const prevEnd = getShiftEndHour(prev);
+                
+                // Check conflict with yesterday's shift
+                if (prev.day === targetDay - 1) {
+                    const gap = (targetStart + 24) - prevEnd;
+                    if (gap < fatigueGap) return true;
+                }
+                
+                // Check conflict with today's shift ending too close to tomorrow's shift
+                if (prev.day === targetDay + 1) {
+                    const prevStart = SLOT_START[prev.slotIndex ?? 0] ?? 8;
+                    const gap = (prevStart + 24) - targetStart;
+                    if (gap < fatigueGap) return true;
+                }
+                
+                return false;
+            });
+        };
+
+        // Helper: bidirectional referral buffer conflict check
+        // A doctor cannot take an ER slot if they have a referral within referralBufferDays
+        // (in either direction), and cannot take a referral if they have any shift nearby
+        const hasReferralBufferConflict = (candidate: string, targetDay: number, targetIsReferral: boolean): boolean => {
+            const allShifts = [
+                ...wardShifts.filter(x => x.doctorId === candidate),
+                ...newERShifts.filter(x => x.doctorId === candidate)
+            ];
+            
+            if (targetIsReferral) {
+                // For referral assignment: no other shift (ward or ER) within buffer days
+                for (let offset = 1; offset <= referralBufferDays; offset++) {
+                    if (allShifts.some(x => x.day === targetDay - offset || x.day === targetDay + offset)) return true;
+                }
+            } else {
+                // For non-referral ER: cannot assign if doctor has a referral within buffer days
+                const referralShifts = allShifts.filter(x => x.wardId === 'referral');
+                for (const ref of referralShifts) {
+                    if (Math.abs(ref.day - targetDay) <= referralBufferDays) return true;
+                }
+            }
+            
+            return false;
+        };
+
         for (let day = 1; day <= daysInMonth; day++) {
             categories.forEach(cat => {
                 const pool = new Set<string>();
@@ -510,36 +576,6 @@ export function useStaffingData() {
                 cat.slots.forEach((staffCount, slotIdx) => {
                     for (let s = 0; s < staffCount; s++) {
 
-                        // --- Slot time boundaries (hours from day midnight) ---
-                        // Slot 0: 08:00-14:00  Slot 1: 14:00-20:00
-                        // Slot 2: 20:00-02:00  Slot 3: 02:00-08:00
-                        const SLOT_START = [8, 14, 20, 26]; // 26 = 02:00 next-day
-                        const SLOT_END   = [14, 20, 26, 32]; // 32 = 08:00 next-day
-
-                        // Helper: does yesterday's ER shift violate 12h rest before today's slotIdx?
-                        const hasERConflictYesterday = (candidate: string): boolean => {
-                            return newERShifts.some(prev => {
-                                if (prev.day !== day - 1 || prev.doctorId !== candidate) return false;
-                                const prevEndHour = SLOT_END[prev.slotIndex ?? 0] ?? 24;
-                                const todayStartHour = SLOT_START[slotIdx] ?? 8;
-                                const gap = (todayStartHour + 24) - prevEndHour;
-                                return gap < fatigueGap;
-                            });
-                        };
-
-                        // Helper: does candidate have any shift within referralBufferDays of a referral?
-                        const hasReferralBufferConflict = (candidate: string): boolean => {
-                            if (cat.id !== 'referral') return false; // only applies to referral category
-                            const allDayShifts = [
-                                ...wardShifts.filter(x => x.doctorId === candidate),
-                                ...newERShifts.filter(x => x.doctorId === candidate)
-                            ];
-                            for (let offset = 1; offset <= referralBufferDays; offset++) {
-                                if (allDayShifts.some(x => x.day === day - offset || x.day === day + offset)) return true;
-                            }
-                            return false;
-                        };
-
                         // Sort helper: for ER slots use erCallCount (not total hours) so referral's
                         // 24h weight does NOT push doctors out of the ER rotation.
                         // For referral slots use referralCount so the duty spreads across more males.
@@ -551,7 +587,7 @@ export function useStaffingData() {
                         const underHardCap = (id: string) =>
                             cat.id === 'referral' || (erCallCount[id] ?? 0) < ER_CALL_HARD_CAP;
 
-                        // Pass 1: Strict (ward 12h rest + ER cross-day 12h rest + referral buffer + hard cap)
+                        // Pass 1: Strict (ward 12h rest + bidirectional ER cross-day 12h rest + referral buffer + hard cap)
                         let eligible = poolArray
                             .filter(candidate => {
                                 const doc = doctorMap.get(candidate);
@@ -568,8 +604,9 @@ export function useStaffingData() {
                                 const yesterdayWardConflict = hasWardShiftYesterday && !isNightCall;
                                 const tomorrowWardConflict  = hasWardShiftTomorrow  && isNightCall;
 
-                                const erCrossConflict = hasERConflictYesterday(candidate);
-                                const refBufferConflict = hasReferralBufferConflict(candidate);
+                                // Bidirectional ER cross-day conflict check
+                                const erCrossConflict = hasERCrossDayConflict(candidate, day, slotIdx);
+                                const refBufferConflict = hasReferralBufferConflict(candidate, day, cat.id === 'referral');
 
                                 return !hasWardShiftToday && !yesterdayWardConflict && !tomorrowWardConflict && !hasOtherERToday && !erCrossConflict && !refBufferConflict;
                             })
@@ -585,8 +622,8 @@ export function useStaffingData() {
 
                                     const hasWardShiftToday = wardShifts.some(x => x.day === day && x.doctorId === candidate);
                                     const hasOtherERToday   = newERShifts.some(x => x.day === day && x.doctorId === candidate);
-                                    const erCrossConflict   = hasERConflictYesterday(candidate);
-                                    const refBufferConflict = hasReferralBufferConflict(candidate);
+                                    const erCrossConflict   = hasERCrossDayConflict(candidate, day, slotIdx);
+                                    const refBufferConflict = hasReferralBufferConflict(candidate, day, cat.id === 'referral');
 
                                     return !hasWardShiftToday && !hasOtherERToday && !erCrossConflict && !refBufferConflict;
                                 })
@@ -600,7 +637,7 @@ export function useStaffingData() {
                                     const doc = doctorMap.get(candidate);
                                     if (cat.maleOnly && doc?.gender !== 'Male') return false;
                                     const sameDay = newERShifts.some(x => x.day === day && x.doctorId === candidate);
-                                    const refBufferConflict = hasReferralBufferConflict(candidate);
+                                    const refBufferConflict = hasReferralBufferConflict(candidate, day, cat.id === 'referral');
                                     return !sameDay && !refBufferConflict;
                                 })
                                 .sort((a, b) => sortKey(a) - sortKey(b));
@@ -691,12 +728,18 @@ export function useStaffingData() {
         const balanceThreshold = erConfig.balanceThreshold ?? 12;
         const referralBufferDays = erConfig.referralBufferDays ?? 1;
 
+        // Helper: get shift end hour, handling 24h referral slots
+        const getShiftEndHour = (s: ShiftRecord): number => {
+            if (s.wardId === 'referral') return 24;
+            return SLOT_END[s.slotIndex ?? 0] ?? 24;
+        };
+
         const canTakeShift = (doctorId: string, shift: ShiftRecord, shifts: ShiftRecord[]): boolean => {
             const doctorShifts = shifts.filter(s => s.period === period && s.doctorId === doctorId && s.id !== shift.id);
             const isNightER = (shift.slotIndex ?? 0) >= 2;
             const isWardShift = !shift.wardId.startsWith('er-') && shift.wardId !== 'referral';
             const shiftStart = SLOT_START[shift.slotIndex ?? 0] ?? 8;
-            const shiftEnd   = SLOT_END[shift.slotIndex ?? 0] ?? 24;
+            const shiftEnd = shift.wardId === 'referral' ? 24 : (SLOT_END[shift.slotIndex ?? 0] ?? 24);
 
             // Referral buffer: no shift at all within ±referralBufferDays of referral call
             if (shift.wardId === 'referral') {
@@ -714,14 +757,19 @@ export function useStaffingData() {
             for (const s of doctorShifts) {
                 if (s.day === shift.day) return false;
 
-                // Cross-day ER rest rule (configurable fatigue gap)
-                if (s.wardId.startsWith('er-') && s.day === shift.day - 1) {
-                    const prevEnd = SLOT_END[s.slotIndex ?? 0] ?? 24;
-                    if ((shiftStart + 24) - prevEnd < fatigueGap) return false;
-                }
-                if (s.wardId.startsWith('er-') && s.day === shift.day + 1) {
-                    const nextStart = SLOT_START[s.slotIndex ?? 0] ?? 8;
-                    if ((nextStart + 24) - shiftEnd < fatigueGap) return false;
+                const sEnd = getShiftEndHour(s);
+
+                // Cross-day ER rest rule (configurable fatigue gap) - bidirectional
+                if (s.wardId.startsWith('er-') || s.wardId === 'referral') {
+                    // Check if yesterday's shift ends too close to today's start
+                    if (s.day === shift.day - 1) {
+                        if ((shiftStart + 24) - sEnd < fatigueGap) return false;
+                    }
+                    // Check if today's shift ends too close to tomorrow's shift
+                    if (s.day === shift.day + 1) {
+                        const sStart = SLOT_START[s.slotIndex ?? 0] ?? 8;
+                        if ((sStart + 24) - shiftStart < fatigueGap) return false;
+                    }
                 }
 
                 // Ward-to-ER fatigue rules
@@ -1076,7 +1124,7 @@ export function useStaffingData() {
 
         const candidates = currentShifts.filter(s => 
             s.period === period && 
-            s.wardId.startsWith('er-') && 
+            (s.wardId.startsWith('er-') || s.wardId === 'referral') && 
             s.doctorId !== docA && 
             s.day !== shiftA.day
         );
@@ -1084,26 +1132,40 @@ export function useStaffingData() {
         const SLOT_START = [8, 14, 20, 26]; 
         const SLOT_END   = [14, 20, 26, 32];
 
-        const checkSafe12h = (dId: string, targetShift: ShiftRecord, excludeId: string) => {
-            let targetStart = (targetShift.day - 1) * 24 + (SLOT_START[targetShift.slotIndex ?? 0] ?? 8);
-            let targetEnd = (targetShift.day - 1) * 24 + (SLOT_END[targetShift.slotIndex ?? 0] ?? 24);
+        // Helper: get shift end hour, handling 24h referral slots
+        const getShiftEndHour = (s: ShiftRecord): number => {
+            if (s.wardId === 'referral') return 24;
+            return SLOT_END[s.slotIndex ?? 0] ?? 24;
+        };
 
-            if (!targetShift.wardId.startsWith('er-') && targetShift.slotIndex === undefined) {
+        const checkSafe12h = (dId: string, targetShift: ShiftRecord, excludeId: string) => {
+            const targetStart = (targetShift.day - 1) * 24 + (SLOT_START[targetShift.slotIndex ?? 0] ?? 8);
+            let targetEnd: number;
+            
+            if (targetShift.wardId === 'referral') {
+                targetEnd = targetStart + 24;
+            } else if (!targetShift.wardId.startsWith('er-')) {
                 const ward = wardMap.get(targetShift.wardId);
                 const duration = ward?.requirements?.shiftDuration === '6h' ? 6 : ward?.requirements?.shiftDuration === '12h' ? 12 : 24;
                 targetEnd = targetStart + duration;
+            } else {
+                targetEnd = (targetShift.day - 1) * 24 + getShiftEndHour(targetShift);
             }
 
             return !currentShifts.some(s => {
                 if (s.period !== period || s.doctorId !== dId || s.id === excludeId) return false;
                 
-                let sStart = (s.day - 1) * 24 + (SLOT_START[s.slotIndex ?? 0] ?? 8);
-                let sEnd = (s.day - 1) * 24 + (SLOT_END[s.slotIndex ?? 0] ?? 24);
-
-                if (!s.wardId.startsWith('er-') && s.slotIndex === undefined) {
+                const sStart = (s.day - 1) * 24 + (SLOT_START[s.slotIndex ?? 0] ?? 8);
+                let sEnd: number;
+                
+                if (s.wardId === 'referral') {
+                    sEnd = sStart + 24;
+                } else if (!s.wardId.startsWith('er-')) {
                     const ward = wardMap.get(s.wardId);
                     const duration = ward?.requirements?.shiftDuration === '6h' ? 6 : ward?.requirements?.shiftDuration === '12h' ? 12 : 24;
                     sEnd = sStart + duration;
+                } else {
+                    sEnd = (s.day - 1) * 24 + getShiftEndHour(s);
                 }
 
                 const gap = Math.max(targetStart - sEnd, sStart - targetEnd);
